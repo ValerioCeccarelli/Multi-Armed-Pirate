@@ -10,14 +10,14 @@ class BudgetDepletedException(RuntimeError):
 
 
 class Environment:
-    def __init__(self, mean: list[float | int], std: list[float | int], T: int):
+    def __init__(self, mean: list[float], std: list[float], T: int):
         # Valuations is (items, time) matrix
         # each line is the valuations for a specific item over time
         self.valuations = np.array(
             [np.random.normal(m, s, size=T) for m, s in zip(mean, std)]
         )
 
-    def round(self, t: int, prices_t: list[float | int]) -> list[bool]:
+    def round(self, t: int, prices_t: list[float]) -> list[bool]:
         return [p <= v for p, v in zip(prices_t, self.valuations[:, t])]
 
 
@@ -28,15 +28,18 @@ from typing import Collection
 @dataclass
 class SimulationConfig:
     num_rounds: int
-    prices_per_item: list[list[float | int]]
+    prices_per_item: list[list[float]]
     total_budget: int
 
 
 # TODO: scrivere che si tratta di un semi bandit feedback nella descrizione
 @dataclass
 class SingleSimulationResult:
-    best_price_per_item: Collection[float]
-    agent_rewards: np.ndarray
+    baseline_price_per_item: Collection[float]
+    # Each dictionary maps price_idx to frequency
+    arm_freq_per_item: Collection[dict[int, float]]
+    # for each round, sum of rewards across all items
+    agent_reward_sums: np.ndarray
     baseline_rewards: np.ndarray
     budget_depleted_round: int
 
@@ -44,10 +47,12 @@ class SingleSimulationResult:
 @dataclass
 class AggregatedSimulationResult:
     cumulative_regrets: np.ndarray
+    # Each dictionary maps price_idx to mean of frequencies across trials
+    mean_arm_freq_per_item: Collection[dict[int, float]]
     total_baseline_rewards: np.ndarray
     total_agent_rewards: np.ndarray
     budget_depleted_mean_round: float
-    best_prices_per_item: np.ndarray
+    baseline_prices_per_item: np.ndarray
 
 
 def get_baseline(env, config: SimulationConfig) -> tuple[Collection[float], np.ndarray]:
@@ -133,7 +138,7 @@ class CombinatorialUCBBidding:
 
         # --- UCB/LCB Calculation Phase ---
         # Add a small epsilon to avoid division by zero.
-        confidence_term = np.sqrt((self.beta * np.log(self.T)) / (self.N_pulls + 1e-8))
+        confidence_term = self.beta * np.sqrt((np.log(self.T)) / (self.N_pulls + 1e-8))
 
         f_ucbs = self.avg_rewards + confidence_term
         c_lcbs = np.maximum(
@@ -244,7 +249,9 @@ def run_simulation(
     agent_rewards = []  # scalar per round (sum over items)
 
     # Baseline (best fixed super-arm) computed once on the true environment valuations
-    best_prices_per_item, baseline_rewards = get_baseline(env, config)
+    baseline_prices_per_item, baseline_rewards = get_baseline(env, config)
+
+    arm_freq_per_item = [dict() for _ in range(len(config.prices_per_item))]
 
     try:
         for t in range(config.num_rounds):
@@ -261,6 +268,12 @@ def run_simulation(
             rewards_items = np.array(
                 [p if bought else 0 for p, bought in zip(prices_t, bought_list)]
             )
+
+            for i in range(len(config.prices_per_item)):
+                if prices_t[i] not in arm_freq_per_item[i]:
+                    arm_freq_per_item[i][prices_t[i]] = 0
+                arm_freq_per_item[i][prices_t[i]] += 1
+
             costs_items = np.array(
                 bought_list, dtype=int
             )  # each sale consumes 1 budget unit
@@ -276,8 +289,9 @@ def run_simulation(
         budget_depleted_round = agent.t
 
     return SingleSimulationResult(
-        best_price_per_item=best_prices_per_item,
-        agent_rewards=np.array(agent_rewards),
+        baseline_price_per_item=baseline_prices_per_item,
+        arm_freq_per_item=arm_freq_per_item,
+        agent_reward_sums=np.array(agent_rewards),
         baseline_rewards=baseline_rewards,
         budget_depleted_round=budget_depleted_round,
     )
@@ -294,7 +308,8 @@ def simulate(
     total_agent_rewards = np.zeros((n_trials, config.num_rounds))
     budget_depleted_rounds = np.zeros(n_trials, dtype=int)
     N_items = len(config.prices_per_item)
-    best_prices_per_item = np.zeros((n_trials, N_items))
+    baseline_prices_per_item = np.zeros((n_trials, N_items))
+    mean_arm_freq_per_item = [dict() for _ in range(N_items)]
 
     for i in range(n_trials):
         print(f"Running trial {i+1}")
@@ -302,19 +317,29 @@ def simulate(
         env = env_builder()
         sim_res = run_simulation(agent, env, config)
 
-        regret = sim_res.baseline_rewards - sim_res.agent_rewards
+        regret = sim_res.baseline_rewards - sim_res.agent_reward_sums
         cumulative_regrets[i] = np.cumsum(regret)
         total_baseline_rewards[i] = sim_res.baseline_rewards
-        total_agent_rewards[i] = sim_res.agent_rewards
+        total_agent_rewards[i] = sim_res.agent_reward_sums
         budget_depleted_rounds[i] = sim_res.budget_depleted_round
-        best_prices_per_item[i] = np.array(sim_res.best_price_per_item)
+        baseline_prices_per_item[i] = np.array(sim_res.baseline_price_per_item)
+        for i in range(N_items):
+            for k, v in sim_res.arm_freq_per_item[i].items():
+                if k not in mean_arm_freq_per_item[i]:
+                    mean_arm_freq_per_item[i][k] = 0
+                mean_arm_freq_per_item[i][k] += v
+
+    for i in range(N_items):
+        for k in mean_arm_freq_per_item[i]:
+            mean_arm_freq_per_item[i][k] /= n_trials
 
     return AggregatedSimulationResult(
         cumulative_regrets=cumulative_regrets,
+        mean_arm_freq_per_item=mean_arm_freq_per_item,
         total_baseline_rewards=total_baseline_rewards,
         total_agent_rewards=total_agent_rewards,
         budget_depleted_mean_round=budget_depleted_rounds.mean(),
-        best_prices_per_item=best_prices_per_item,
+        baseline_prices_per_item=baseline_prices_per_item,
     )
 
 
@@ -362,8 +387,8 @@ def show_cumulative_rewards(
 
 
 def show_histogram(result: AggregatedSimulationResult):
-    # Create separate histograms for each product/item
-    n_items = result.best_prices_per_item.shape[1]
+    # Create separate histograms for each product/item based on mean_arm_freq_per_item
+    n_items = len(result.mean_arm_freq_per_item)
 
     # Create subplots for each item
     fig, axes = plt.subplots(1, n_items, figsize=(5 * n_items, 4))
@@ -372,17 +397,50 @@ def show_histogram(result: AggregatedSimulationResult):
     if n_items == 1:
         axes = [axes]
 
-    for item_idx in range(n_items):
-        # Get prices for this specific item across all trials
-        item_prices = result.best_prices_per_item[:, item_idx]
-        unique, counts = np.unique(item_prices, return_counts=True)
+    baseline_price_per_item = result.baseline_prices_per_item.mean(axis=0)
 
-        ax = axes[item_idx]
-        ax.bar(unique, counts, width=0.7, alpha=0.7)
-        ax.set_xlabel("Price")
-        ax.set_ylabel("Frequency")
-        ax.set_title(f"Best Prices for Item {item_idx + 1}")
-        ax.grid(True, alpha=0.3)
+    for item_idx in range(n_items):
+        # Get the dictionary for this item
+        item_freq_dict = result.mean_arm_freq_per_item[item_idx]
+
+        if item_freq_dict:  # Check if dictionary is not empty
+            # Extract rewards (keys) and frequencies (values)
+            rewards = list(item_freq_dict.keys())
+            frequencies = list(item_freq_dict.values())
+
+            ax = axes[item_idx]
+            ax.bar(rewards, frequencies, width=0.7, alpha=0.7)
+            ax.set_xlabel("Reward")
+            ax.set_ylabel("Mean Frequency")
+            ax.set_title(f"Arm Frequencies for Item {item_idx + 1}")
+            ax.grid(True, alpha=0.3)
+
+            # Add best price line
+            best_price = baseline_price_per_item[item_idx]
+            ax.axvline(
+                x=best_price,
+                color="r",
+                linestyle="--",
+                label=f"Best Price: {best_price:.2f}",
+            )
+            ax.legend()
+        else:
+            # Handle empty dictionary case
+            ax = axes[item_idx]
+            ax.set_xlabel("Reward")
+            ax.set_ylabel("Mean Frequency")
+            ax.set_title(f"Arm Frequencies for Item {item_idx + 1} (No Data)")
+            ax.grid(True, alpha=0.3)
+
+            # Add best price line even for empty data
+            best_price = baseline_price_per_item[item_idx]
+            ax.axvline(
+                x=best_price,
+                color="r",
+                linestyle="--",
+                label=f"Best Price: {best_price:.2f}",
+            )
+            ax.legend()
 
     plt.tight_layout()
 
@@ -393,7 +451,7 @@ def plot_statistics(
     print(f"Average budget depleted round: {result.budget_depleted_mean_round}")
     print(f"Average final regret: {result.cumulative_regrets[:, -1].mean()}")
     print(
-        f"Mean of baseline best prices per item (averaged over trials): {result.best_prices_per_item.mean(axis=0)}"
+        f"Mean of baseline best prices per item (averaged over trials): {result.baseline_prices_per_item.mean(axis=0)}"
     )
     plt.figure(figsize=(15, 10))
     plt.subplot(2, 2, 1)
@@ -416,10 +474,10 @@ def plot_statistics(
 # --- Example experiment setup ---
 
 n_trials = 10  # reduce for speed testing
-T = 500  # reduce for speed testing
+T = 700  # reduce for speed testing
 B = 300  # reduce for speed testing
 N_items = 3
-P = list(range(5, 21, 5))  # price set shared by all items
+P = list(range(5, 41, 5))  # price set shared by all items
 prices_per_item = [P for _ in range(N_items)]
 
 simulation_config = SimulationConfig(
