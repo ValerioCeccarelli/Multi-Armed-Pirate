@@ -2,12 +2,13 @@ from typing import Callable
 from scipy.optimize import milp
 from typing import Collection
 from dataclasses import dataclass
-import itertools
 import random
+import itertools
 
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import optimize
+import multiprocessing as mp
 
 # Set seeds for reproducibility
 random.seed(42)
@@ -37,7 +38,6 @@ class SimulationConfig:
     total_budget: int
 
 
-# TODO: scrivere che si tratta di un semi bandit feedback nella descrizione
 @dataclass
 class SingleSimulationResult:
     baseline_price_per_item: Collection[float]
@@ -101,144 +101,122 @@ def get_baseline(env, config: SimulationConfig) -> tuple[Collection[float], np.n
     return best_prices, best_rewards
 
 
-class CombinatorialUCBBidding:
-    def __init__(self, num_items, price_set, B, T, beta=1.0):
-        self.N = num_items  # Number of item types (N)
-        self.P = price_set  # Discrete set of possible prices for all items
-        self.K_prices = len(self.P)  # Number of prices in the set
-        self.B_initial = B  # Initial total budget
-        self.T = T  # Time horizon
-        self.beta = beta  # UCB/LCB exploration parameter
+class PrimalDualAgent:
+    def __init__(self, num_items, price_set, B, T, beta: float = 0.1, eta: float | None = None):
+        """
+        Primal-dual pacing agent with an EXP3 inner regret minimizer per item.
 
-        # Statistics are stored in N x K_prices matrices
-        self.N_pulls = np.zeros((self.N, self.K_prices))
-        self.avg_rewards = np.zeros((self.N, self.K_prices))
-        self.avg_costs = np.zeros((self.N, self.K_prices))
+        Args:
+            num_items: number of product types (N)
+            price_set: list of discrete prices shared by all items
+            B: total budget (total number of items that can be sold across all types)
+            T: horizon
+            beta: exploration parameter for EXP3 (also used as default dual step if eta not provided)
+            eta: dual step size for lambda update; if None uses beta / sqrt(T)
+        """
+        self.N = num_items
+        self.P = list(price_set)
+        self.K_prices = len(self.P)
 
-        self.remaining_budget = B
+        self.T = T
         self.t = 0
+
+        self.B_initial = int(B)
+        self.remaining_budget = int(B)
+
+        # Pacing parameters
+        self.rho = B / T  # target average cost per round
+        self.lambda_t = 0.0
+        # Dual learning rate
+        self.eta_dual = (beta / np.sqrt(T)) if eta is None else eta
+
+        # EXP3 parameters and state (per item)
+        self.gamma = float(beta)  # exploration (mixing) parameter
+        # learning rate for EXP3; standard safe choice
+        self.eta_exp3 = min(1.0, np.sqrt(
+            np.log(max(self.K_prices, 2)) / (self.K_prices * max(T, 1))))
+        self.weights = np.ones((self.N, self.K_prices), dtype=float)
+        self.last_probs = np.full(
+            (self.N, self.K_prices), 1.0 / self.K_prices, dtype=float)
         # Stores the indices chosen in the last call to pull_superarm
         self.last_chosen_indices = np.zeros(self.N, dtype=int)
+        self._rng = np.random.default_rng()
+
+    def _distributions(self) -> np.ndarray:
+        """Return current action distributions per item, with exploration mixing."""
+        # Normalize weights per item
+        w_sum = self.weights.sum(axis=1, keepdims=True)
+        # Avoid division by zero
+        w_sum[w_sum == 0] = 1.0
+        p = (1.0 - self.gamma) * (self.weights / w_sum) + \
+            self.gamma / self.K_prices
+        # numerical safety
+        p = np.clip(p, 1e-12, 1.0)
+        # renormalize rows
+        p /= p.sum(axis=1, keepdims=True)
+        return p
 
     def pull_superarm(self) -> np.ndarray:
         """
-        Chooses one price index for each of the N items by solving an ILP.
-        Returns a numpy array of price indices.
+        Sample one price index for each item according to EXP3 distributions.
+        Returns: np.ndarray shape (N,) of indices in [0, K_prices).
         """
-        # --- Exploration Phase ---
-        # Ensure each arm (item, price combination) is pulled at least once.
-        for n in range(self.N):
-            for p_idx in range(self.K_prices):
-                if self.N_pulls[n, p_idx] == 0:
-                    # To explore arm (n, p_idx), select index p_idx for item n.
-                    # For all other items, we can choose a default (e.g., index 0).
-                    chosen_price_indices = np.zeros(self.N, dtype=int)
-                    chosen_price_indices[n] = p_idx
-                    self.last_chosen_indices = chosen_price_indices
-                    return self.last_chosen_indices
+        if self.remaining_budget <= 0:
+            # No budget, nothing to choose meaningfully; return any fixed action
+            return np.zeros(self.N, dtype=int)
 
-        # --- UCB/LCB Calculation Phase ---
-        # Add a small epsilon to avoid division by zero.
-        confidence_term = self.beta * \
-            np.sqrt((np.log(self.T)) / (self.N_pulls + 1e-8))
+        probs = self._distributions()
+        self.last_probs = probs
+        indices = np.array([
+            self._rng.choice(self.K_prices, p=probs[i]) for i in range(self.N)
+        ], dtype=int)
+        self.last_chosen_indices = indices
+        return indices
 
-        f_ucbs = self.avg_rewards + confidence_term
-        c_lcbs = np.maximum(
-            0, self.avg_costs - confidence_term
-        )  # Costs cannot be negative
+    # Backward-compat alias if other code uses pull_arm
+    def pull_arm(self) -> np.ndarray:
+        return self.pull_superarm()
 
-        # --- Optimization Phase (ILP) ---
-        # Calculate the target spend rate for the remainder of the horizon.
-        rho_t = self.remaining_budget / \
-            (self.T - self.t) if self.t < self.T else 0
-
-        # Objective: Maximize sum(x_ij * f_ucbs_ij) which is equivalent to
-        # Minimizing sum(x_ij * -f_ucbs_ij)
-        # Decision variables x_ij are binary, 1 if we pick price j for item i.
-        c = -f_ucbs.flatten()
-
-        # Constraint 1 (Budget): Total expected cost must not exceed the spend rate.
-        # sum(x_ij * c_lcbs_ij) <= rho_t
-        A_ub = np.array([c_lcbs.flatten()])
-        b_ub = np.array([rho_t])
-
-        # Constraint 2 (Choice): Exactly one price must be chosen for each item.
-        # For each item i, sum_j(x_ij) = 1
-        A_eq = []
-        for n in range(self.N):
-            row = np.zeros(self.N * self.K_prices)
-            row[n * self.K_prices: (n + 1) * self.K_prices] = 1
-            A_eq.append(row)
-        A_eq = np.array(A_eq)
-        b_eq = np.ones(self.N)
-
-        integrality = np.ones_like(c)  # All variables are integer (binary)
-        bounds = (0, 1)  # All variables are between 0 and 1
-
-        # Create LinearConstraint objects
-        from scipy.optimize import LinearConstraint
-
-        constraints = []
-        if A_ub.size > 0:
-            lb_ub = -1e20 * np.ones_like(
-                b_ub
-            )  # Use very large negative number instead of -inf
-            constraints.append(LinearConstraint(A_ub, lb_ub, b_ub))
-        if A_eq.size > 0:
-            constraints.append(LinearConstraint(A_eq, b_eq, b_eq))
-
-        # Solve the Integer Linear Program
-        res = milp(
-            c=c,
-            integrality=integrality,
-            bounds=bounds,
-            constraints=constraints,
-        )
-
-        if res.success and res.x is not None:
-            # Extract solution: find the index of the '1' for each item row
-            x_sol = np.round(res.x).reshape((self.N, self.K_prices))
-            chosen_price_indices = np.argmax(x_sol, axis=1)
-        else:
-            # --- Fallback Strategy ---
-            # If the solver fails, greedily pick the superarm with the highest UCB
-            # reward among those whose LCB cost is below the spend rate.
-            feasible_mask = c_lcbs <= rho_t
-            masked_f_ucbs = np.where(feasible_mask, f_ucbs, -np.inf)
-            chosen_price_indices = np.argmax(masked_f_ucbs, axis=1)
-
-        self.last_chosen_indices = chosen_price_indices
-        return self.last_chosen_indices
-
-    def update(self, chosen_price_indices, rewards, costs):
+    def update(self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray):
         """
-        Updates agent statistics after a round using the chosen price indices.
+        Update EXP3 weights using Lagrangian gains and update the dual variable.
 
         Args:
-            chosen_price_indices (np.ndarray): Array of indices of prices chosen.
-            rewards (np.ndarray): Array of rewards received for each item.
-            costs (np.ndarray): Array of costs incurred for each item.
+            chosen_price_indices: indices chosen per item (shape (N,))
+            rewards: realized revenue per item (shape (N,))
+            costs: realized cost per item (0/1) (shape (N,))
         """
-        # Iterate through each item and update the stats for the chosen price.
-        for n in range(self.N):
-            p_idx = chosen_price_indices[n]
+        # Sanity cast
+        chosen_price_indices = np.asarray(chosen_price_indices, dtype=int)
+        rewards = np.asarray(rewards, dtype=float)
+        costs = np.asarray(costs, dtype=float)
 
-            # Use incremental mean update formula: M_k = M_{k-1} + (x_k - M_{k-1}) / k
-            # First, increment the pull count for the arm (n, p_idx).
-            self.N_pulls[n, p_idx] += 1
+        # Lagrangian gain per item for the chosen arm
+        gains = rewards - self.lambda_t * costs  # shape (N,)
 
-            # Then, update the running averages for reward and cost.
-            k = self.N_pulls[n, p_idx]
-            self.avg_rewards[n, p_idx] += (rewards[n] -
-                                           self.avg_rewards[n, p_idx]) / k
-            self.avg_costs[n, p_idx] += (costs[n] -
-                                         self.avg_costs[n, p_idx]) / k
+        # Update EXP3 weights using importance-weighted gain estimates
+        for i in range(self.N):
+            k = int(chosen_price_indices[i])
+            p_ik = float(self.last_probs[i, k])
+            if p_ik <= 0:
+                continue
+            # Importance-weighted unbiased estimate of gain
+            ghat = gains[i] / p_ik
+            # EXP3 multiplicative update
+            self.weights[i, k] *= np.exp(self.eta_exp3 * ghat / self.K_prices)
 
-        self.remaining_budget -= np.sum(costs)
+        # Budget accounting
+        consumed = float(costs.sum())
+        self.remaining_budget -= int(consumed)
+
+        # Dual update with projection to [0, 1/rho]
+        upper = (1.0 / self.rho) if self.rho > 0 else 1e6
+        self.lambda_t = float(
+            np.clip(self.lambda_t - self.eta_dual *
+                    (self.rho - consumed), 0.0, upper)
+        )
+
         self.t += 1
-
-
-# --- Simulation utilities (multi-item adaptation of req1) ---
 
 
 def run_simulation(
@@ -299,12 +277,41 @@ def run_simulation(
     )
 
 
+def _simulate_one_trial(args: tuple[int, Callable[[], "PrimalDualAgent"], Callable[[], Environment], SimulationConfig, int | None]) -> SingleSimulationResult:
+    """Helper to run a single trial in a separate process.
+    Applies a per-trial seed to avoid identical runs across processes on Windows.
+    """
+    trial_idx, agent_builder, env_builder, config, seed = args
+    if seed is not None:
+        try:
+            random.seed(int(seed))
+            np.random.seed(int(seed))
+        except Exception:
+            # Best-effort seeding; proceed even if something goes wrong
+            pass
+    agent = agent_builder()
+    env = env_builder()
+    return run_simulation(agent, env, config)
+
+
 def simulate(
-    agent_builder: Callable[[], CombinatorialUCBBidding],
+    agent_builder: Callable[[], PrimalDualAgent],
     env_builder: Callable[[], Environment],
     config: SimulationConfig,
     n_trials: int,
+    processes: int | None = None,
+    seeds: list[int] | None = None,
 ) -> AggregatedSimulationResult:
+    """Run n_trials in parallel using a process pool.
+
+    Args:
+        agent_builder: factory for a fresh agent per trial
+        env_builder: factory for a fresh environment per trial
+        config: simulation configuration
+        n_trials: number of independent trials
+        processes: number of worker processes (defaults to os.cpu_count())
+        seeds: optional list of per-trial seeds to ensure distinct trials
+    """
     cumulative_regrets = np.zeros((n_trials, config.num_rounds))
     total_baseline_rewards = np.zeros((n_trials, config.num_rounds))
     total_agent_rewards = np.zeros((n_trials, config.num_rounds))
@@ -313,27 +320,40 @@ def simulate(
     baseline_prices_per_item = np.zeros((n_trials, N_items))
     mean_arm_freq_per_item = [dict() for _ in range(N_items)]
 
-    for i in range(n_trials):
-        print(f"Running trial {i+1}")
-        agent = agent_builder()
-        env = env_builder()
-        sim_res = run_simulation(agent, env, config)
+    # Generate per-trial seeds if not provided, to avoid identical runs across processes
+    if seeds is None:
+        seeds = np.random.randint(
+            0, 2**31 - 1, size=n_trials, dtype=np.int64).tolist()
 
+    # Prepare payloads
+    payloads = [
+        (i, agent_builder, env_builder, config, seeds[i]) for i in range(n_trials)
+    ]
+
+    # Parallel execution
+    if n_trials <= 1:
+        results = [_simulate_one_trial(payloads[0])]
+    else:
+        with mp.Pool(processes=processes) as pool:
+            results = pool.map(_simulate_one_trial, payloads)
+
+    # Aggregate
+    for i, sim_res in enumerate(results):
         regret = sim_res.baseline_rewards - sim_res.agent_reward_sums
         cumulative_regrets[i] = np.cumsum(regret)
         total_baseline_rewards[i] = sim_res.baseline_rewards
         total_agent_rewards[i] = sim_res.agent_reward_sums
         budget_depleted_rounds[i] = sim_res.budget_depleted_round
         baseline_prices_per_item[i] = np.array(sim_res.baseline_price_per_item)
-        for i in range(N_items):
-            for k, v in sim_res.arm_freq_per_item[i].items():
-                if k not in mean_arm_freq_per_item[i]:
-                    mean_arm_freq_per_item[i][k] = 0
-                mean_arm_freq_per_item[i][k] += v
+        for item_idx in range(N_items):
+            for k, v in sim_res.arm_freq_per_item[item_idx].items():
+                if k not in mean_arm_freq_per_item[item_idx]:
+                    mean_arm_freq_per_item[item_idx][k] = 0
+                mean_arm_freq_per_item[item_idx][k] += v
 
-    for i in range(N_items):
-        for k in mean_arm_freq_per_item[i]:
-            mean_arm_freq_per_item[i][k] /= n_trials
+    for item_idx in range(N_items):
+        for k in mean_arm_freq_per_item[item_idx]:
+            mean_arm_freq_per_item[item_idx][k] /= n_trials
 
     return AggregatedSimulationResult(
         cumulative_regrets=cumulative_regrets,
@@ -476,37 +496,37 @@ def plot_statistics(
 # --- Example experiment setup ---
 
 n_trials = 10  # reduce for speed testing
+T = 3000  # reduce for speed testing
+B = 1000  # reduce for speed testing
 
-# T = 700
-# B = 300
+# Environment builder: specify mean & std per item
+means = [8, 15, 23]
+stds = [4, 5, 6]
 
-T = 1400  # reduce for speed testing
-B = 300  # reduce for speed testing
-N_items = 3
-P = list(range(5, 41, 5))  # price set shared by all items
+assert len(means) == len(stds)
+
+N_items = len(means)
+P = list(range(5, 41, 2))  # price set shared by all items
 prices_per_item = [P for _ in range(N_items)]
 
 simulation_config = SimulationConfig(
     num_rounds=T, prices_per_item=prices_per_item, total_budget=B
 )
 
-# Environment builder: specify mean & std per item
-means = [10, 15, 20]
-stds = [4, 5, 6]
-
 
 def env_builder(): return Environment(mean=means, std=stds, T=T)
 
 
-def agent_builder(): return CombinatorialUCBBidding(
-    num_items=N_items, price_set=P, B=B, T=T, beta=0.2
+def agent_builder(): return PrimalDualAgent(
+    num_items=N_items, price_set=P, B=B, T=T, beta=5
 )
 
 
-result = simulate(
-    agent_builder=agent_builder,
-    env_builder=env_builder,
-    config=simulation_config,
-    n_trials=n_trials,
-)
-plot_statistics(result, rounds_per_trial=T, n_trials=n_trials)
+if __name__ == "__main__":
+    result = simulate(
+        agent_builder=agent_builder,
+        env_builder=env_builder,
+        config=simulation_config,
+        n_trials=n_trials,
+    )
+    plot_statistics(result, rounds_per_trial=T, n_trials=n_trials)
