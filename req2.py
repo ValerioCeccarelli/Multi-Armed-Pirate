@@ -1,512 +1,252 @@
-from typing import Callable
-from scipy.optimize import milp
-from typing import Collection
-from dataclasses import dataclass
-import itertools
+"""
+Main script for executing combinatorial pricing simulation.
+
+This script configures and runs a complete simulation of the combinatorial UCB
+agent in a multi-item pricing environment with budget constraints.
+"""
+
 import random
-
 import numpy as np
-from matplotlib import pyplot as plt
-from scipy import optimize
 
-# Set seeds for reproducibility
-random.seed(42)
-np.random.seed(42)
-
-
-class BudgetDepletedException(RuntimeError):
-    pass
+from src.agent import CombinatorialUCBBidding
+from src.core import simulate, ExperimentConfig, EnvironmentConfig, run_single_simulation
+from src.environment import Environment
+from src.plotting import plot_statistics, PlottingConfig, create_animated_histogram
 
 
-class Environment:
-    def __init__(self, mean: list[float], std: list[float], T: int):
-        # Valuations is (items, time) matrix
-        # each line is the valuations for a specific item over time
-        self.valuations = np.array(
-            [np.random.normal(m, s, size=T) for m, s in zip(mean, std)]
-        )
-
-    def round(self, t: int, prices_t: list[float]) -> list[bool]:
-        return [p <= v for p, v in zip(prices_t, self.valuations[:, t])]
-
-
-@dataclass
-class SimulationConfig:
-    num_rounds: int
-    prices_per_item: list[list[float]]
-    total_budget: int
-
-
-# TODO: scrivere che si tratta di un semi bandit feedback nella descrizione
-@dataclass
-class SingleSimulationResult:
-    baseline_price_per_item: Collection[float]
-    # Each dictionary maps price_idx to frequency
-    arm_freq_per_item: Collection[dict[int, float]]
-    # for each round, sum of rewards across all items
-    agent_reward_sums: np.ndarray
-    baseline_rewards: np.ndarray
-    budget_depleted_round: int
-
-
-@dataclass
-class AggregatedSimulationResult:
-    cumulative_regrets: np.ndarray
-    # Each dictionary maps price_idx to mean of frequencies across trials
-    mean_arm_freq_per_item: Collection[dict[int, float]]
-    total_baseline_rewards: np.ndarray
-    total_agent_rewards: np.ndarray
-    budget_depleted_mean_round: float
-    baseline_prices_per_item: np.ndarray
-
-
-def get_baseline(env, config: SimulationConfig) -> tuple[Collection[float], np.ndarray]:
+def setup_reproducible_environment(seed: int = 42) -> None:
     """
-    Return:
-        best_prices: Collection[float] - the best prices for each item
-        best_rewards: np.ndarray - the rewards at each time step respecting the budget
+    Configure environment for reproducible results.
+    
+    Args:
+        seed: Seed for random number generators
     """
-    best_prices = []
-    best_rewards = np.ndarray([])
-    best_reward = -1
+    random.seed(seed)
+    np.random.seed(seed)
 
-    # Create all possible combinations of prices for the items
-    super_arms = list(itertools.product(*config.prices_per_item))
 
-    for super_arm in super_arms:
-        p = np.array(super_arm)
-        # Create a mask where valuations are greater than or equal to the prices
-        mask = env.valuations >= p[:, np.newaxis]
+def create_experiment_config() -> ExperimentConfig:
+    """
+    Create complete configuration for the experiment.
+    
+    Returns:
+        Experiment configuration
+    """
+    # Environment configuration
+    # Number of items is automatically inferred from the length of means and stds
+    env_config = EnvironmentConfig(
+        means=[25],  # Valuation means for each item
+        stds=[10],    # Standard deviations for each item
+    )
+    
+    # Complete experiment configuration
+    # num_items is automatically inferred from env_config.num_items (= len(means) = len(stds))
+    experiment_config = ExperimentConfig(
+        time_horizon=1400,
+        budget=300,
+        price_range=list(range(5, 41, 5)),  # Prices from 5 to 40 with step 5
+        num_trials=10,
+        exploration_param=0.2,
+        environment=env_config
+    )
+    
+    return experiment_config
 
-        # Calculate the rewards matrix
-        rewards_matrix = mask * p[:, np.newaxis]
 
-        # Calculate the cumulative sum of rewards over time
-        cumulative_cost = np.cumsum(mask.sum(axis=0))
+def create_multi_item_experiment_config() -> ExperimentConfig:
+    """
+    Example configuration for a multi-item experiment.
+    
+    Returns:
+        Experiment configuration with 3 items
+    """
+    # Environment configuration for 3 different items
+    # num_items = 3 is automatically inferred from list length
+    env_config = EnvironmentConfig(
+        means=[10, 15, 20],  # Different means for each item
+        stds=[4, 5, 6],      # Different standard deviations for each item
+    )
+    
+    # Experiment configuration doesn't specify num_items
+    # It's automatically inferred as len(means) = len(stds) = 3
+    experiment_config = ExperimentConfig(
+        time_horizon=1000,
+        budget=200,
+        price_range=list(range(5, 31, 5)),  # Prices from 5 to 30
+        num_trials=1,
+        exploration_param=0.3,
+        environment=env_config
+    )
+    
+    return experiment_config
 
-        # Apply the budget constraint
-        budget_mask = cumulative_cost <= (
-            config.total_budget - len(config.prices_per_item)
+
+def create_environment_builder(env_config: EnvironmentConfig, 
+                             time_horizon: int) -> callable:
+    """
+    Create a builder function for the environment.
+    
+    Args:
+        env_config: Environment configuration
+        time_horizon: Time horizon
+        
+    Returns:
+        Function that creates new environment instances
+    """
+    def builder():
+        return Environment(
+            mean=env_config.means, 
+            std=env_config.stds, 
+            time_horizon=time_horizon
         )
-
-        # Calculate the total reward for this super_arm
-        total_rewards = rewards_matrix.sum(axis=0) * budget_mask
-        total_reward = total_rewards.sum()
-
-        if total_reward > best_reward:
-            best_reward = total_reward
-            best_prices = super_arm
-            best_rewards = total_rewards
-
-    return best_prices, best_rewards
+    return builder
 
 
-class CombinatorialUCBBidding:
-    def __init__(self, num_items, price_set, B, T, beta=1.0):
-        self.N = num_items  # Number of item types (N)
-        self.P = price_set  # Discrete set of possible prices for all items
-        self.K_prices = len(self.P)  # Number of prices in the set
-        self.B_initial = B  # Initial total budget
-        self.T = T  # Time horizon
-        self.beta = beta  # UCB/LCB exploration parameter
-
-        # Statistics are stored in N x K_prices matrices
-        self.N_pulls = np.zeros((self.N, self.K_prices))
-        self.avg_rewards = np.zeros((self.N, self.K_prices))
-        self.avg_costs = np.zeros((self.N, self.K_prices))
-
-        self.remaining_budget = B
-        self.t = 0
-        # Stores the indices chosen in the last call to pull_superarm
-        self.last_chosen_indices = np.zeros(self.N, dtype=int)
-
-    def pull_superarm(self) -> np.ndarray:
-        """
-        Chooses one price index for each of the N items by solving an ILP.
-        Returns a numpy array of price indices.
-        """
-        # --- Exploration Phase ---
-        # Ensure each arm (item, price combination) is pulled at least once.
-        for n in range(self.N):
-            for p_idx in range(self.K_prices):
-                if self.N_pulls[n, p_idx] == 0:
-                    # To explore arm (n, p_idx), select index p_idx for item n.
-                    # For all other items, we can choose a default (e.g., index 0).
-                    chosen_price_indices = np.zeros(self.N, dtype=int)
-                    chosen_price_indices[n] = p_idx
-                    self.last_chosen_indices = chosen_price_indices
-                    return self.last_chosen_indices
-
-        # --- UCB/LCB Calculation Phase ---
-        # Add a small epsilon to avoid division by zero.
-        confidence_term = self.beta * \
-            np.sqrt((np.log(self.T)) / (self.N_pulls + 1e-8))
-
-        f_ucbs = self.avg_rewards + confidence_term
-        c_lcbs = np.maximum(
-            0, self.avg_costs - confidence_term
-        )  # Costs cannot be negative
-
-        # --- Optimization Phase (ILP) ---
-        # Calculate the target spend rate for the remainder of the horizon.
-        rho_t = self.remaining_budget / \
-            (self.T - self.t) if self.t < self.T else 0
-
-        # Objective: Maximize sum(x_ij * f_ucbs_ij) which is equivalent to
-        # Minimizing sum(x_ij * -f_ucbs_ij)
-        # Decision variables x_ij are binary, 1 if we pick price j for item i.
-        c = -f_ucbs.flatten()
-
-        # Constraint 1 (Budget): Total expected cost must not exceed the spend rate.
-        # sum(x_ij * c_lcbs_ij) <= rho_t
-        A_ub = np.array([c_lcbs.flatten()])
-        b_ub = np.array([rho_t])
-
-        # Constraint 2 (Choice): Exactly one price must be chosen for each item.
-        # For each item i, sum_j(x_ij) = 1
-        A_eq = []
-        for n in range(self.N):
-            row = np.zeros(self.N * self.K_prices)
-            row[n * self.K_prices: (n + 1) * self.K_prices] = 1
-            A_eq.append(row)
-        A_eq = np.array(A_eq)
-        b_eq = np.ones(self.N)
-
-        integrality = np.ones_like(c)  # All variables are integer (binary)
-        bounds = (0, 1)  # All variables are between 0 and 1
-
-        # Create LinearConstraint objects
-        from scipy.optimize import LinearConstraint
-
-        constraints = []
-        if A_ub.size > 0:
-            lb_ub = -1e20 * np.ones_like(
-                b_ub
-            )  # Use very large negative number instead of -inf
-            constraints.append(LinearConstraint(A_ub, lb_ub, b_ub))
-        if A_eq.size > 0:
-            constraints.append(LinearConstraint(A_eq, b_eq, b_eq))
-
-        # Solve the Integer Linear Program
-        res = milp(
-            c=c,
-            integrality=integrality,
-            bounds=bounds,
-            constraints=constraints,
+def create_agent_builder(experiment_config: ExperimentConfig) -> callable:
+    """
+    Create a builder function for the agent.
+    
+    Args:
+        experiment_config: Experiment configuration
+        
+    Returns:
+        Function that creates new agent instances
+    """
+    def builder():
+        return CombinatorialUCBBidding(
+            num_items=experiment_config.num_items,
+            price_set=experiment_config.price_range,
+            budget=experiment_config.budget,
+            time_horizon=experiment_config.time_horizon,
+            exploration_param=experiment_config.exploration_param
         )
+    return builder
 
-        if res.success and res.x is not None:
-            # Extract solution: find the index of the '1' for each item row
-            x_sol = np.round(res.x).reshape((self.N, self.K_prices))
-            chosen_price_indices = np.argmax(x_sol, axis=1)
-        else:
-            # --- Fallback Strategy ---
-            # If the solver fails, greedily pick the superarm with the highest UCB
-            # reward among those whose LCB cost is below the spend rate.
-            feasible_mask = c_lcbs <= rho_t
-            masked_f_ucbs = np.where(feasible_mask, f_ucbs, -np.inf)
-            chosen_price_indices = np.argmax(masked_f_ucbs, axis=1)
 
-        self.last_chosen_indices = chosen_price_indices
-        return self.last_chosen_indices
-
-    def update(self, chosen_price_indices, rewards, costs):
-        """
-        Updates agent statistics after a round using the chosen price indices.
+def print_experiment_summary(config: ExperimentConfig) -> None:
+    """
+    Print a summary of experiment parameters.
 
         Args:
-            chosen_price_indices (np.ndarray): Array of indices of prices chosen.
-            rewards (np.ndarray): Array of rewards received for each item.
-            costs (np.ndarray): Array of costs incurred for each item.
-        """
-        # Iterate through each item and update the stats for the chosen price.
-        for n in range(self.N):
-            p_idx = chosen_price_indices[n]
-
-            # Use incremental mean update formula: M_k = M_{k-1} + (x_k - M_{k-1}) / k
-            # First, increment the pull count for the arm (n, p_idx).
-            self.N_pulls[n, p_idx] += 1
-
-            # Then, update the running averages for reward and cost.
-            k = self.N_pulls[n, p_idx]
-            self.avg_rewards[n, p_idx] += (rewards[n] -
-                                           self.avg_rewards[n, p_idx]) / k
-            self.avg_costs[n, p_idx] += (costs[n] -
-                                         self.avg_costs[n, p_idx]) / k
-
-        self.remaining_budget -= np.sum(costs)
-        self.t += 1
-
-
-# --- Simulation utilities (multi-item adaptation of req1) ---
-
-
-def run_simulation(
-    agent, env: Environment, config: SimulationConfig
-) -> SingleSimulationResult:
-    """Run one simulation episode for the combinatorial setting.
-    Accumulates total (across items) rewards per round.
+        config: Experiment configuration
     """
-    agent_rewards = []  # scalar per round (sum over items)
+    print("EXPERIMENT PARAMETERS:")
+    print(f"- Time horizon: {config.time_horizon} rounds")
+    print(f"- Total budget: {config.budget} units")
+    print(f"- Number of items: {config.num_items}")
+    print(f"- Available prices: {config.price_range}")
+    print(f"- Number of trials: {config.num_trials}")
+    print(f"- Exploration parameter: {config.exploration_param}")
+    print(f"- Valuation means: {config.environment.means}")
+    print(f"- Standard deviations: {config.environment.stds}")
 
-    # Baseline (best fixed super-arm) computed once on the true environment valuations
-    baseline_prices_per_item, baseline_rewards = get_baseline(env, config)
 
-    arm_freq_per_item = [dict() for _ in range(len(config.prices_per_item))]
-
-    try:
-        for t in range(config.num_rounds):
-            # Stop if budget exhausted
-            if agent.remaining_budget <= 0:
-                raise BudgetDepletedException()
-
-            price_indices = agent.pull_superarm()  # one index per item
-            # Map indices to actual prices
-            prices_t = [
-                config.prices_per_item[i][idx] for i, idx in enumerate(price_indices)
-            ]
-            bought_list = env.round(t, prices_t)  # list[bool] length N
-            rewards_items = np.array(
-                [p if bought else 0 for p, bought in zip(
-                    prices_t, bought_list)]
-            )
-
-            for i in range(len(config.prices_per_item)):
-                if prices_t[i] not in arm_freq_per_item[i]:
-                    arm_freq_per_item[i][prices_t[i]] = 0
-                arm_freq_per_item[i][prices_t[i]] += 1
-
-            costs_items = np.array(
-                bought_list, dtype=int
-            )  # each sale consumes 1 budget unit
-            total_reward_t = rewards_items.sum()
-            agent.update(price_indices, rewards_items, costs_items)
-            agent_rewards.append(total_reward_t)
-    except BudgetDepletedException:
-        # Pad remaining rounds with zeros
-        remaining = config.num_rounds - len(agent_rewards)
-        if remaining > 0:
-            agent_rewards.extend([0] * remaining)
-    finally:
-        budget_depleted_round = agent.t
-
-    return SingleSimulationResult(
-        baseline_price_per_item=baseline_prices_per_item,
-        arm_freq_per_item=arm_freq_per_item,
-        agent_reward_sums=np.array(agent_rewards),
-        baseline_rewards=baseline_rewards,
-        budget_depleted_round=budget_depleted_round,
+def run_experiment_with_animation() -> None:
+    """
+    Execute simulation with animation generation.
+    """
+    print("Starting combinatorial pricing simulation with animation...")
+    print("=" * 60)
+    
+    setup_reproducible_environment()
+    
+    experiment_config = create_multi_item_experiment_config()
+    
+    print(f"Number of items: {experiment_config.num_items}")
+    print_experiment_summary(experiment_config)
+    print("=" * 60)
+    
+    # Create builders
+    env_builder = create_environment_builder(
+        experiment_config.environment, 
+        experiment_config.time_horizon
     )
-
-
-def simulate(
-    agent_builder: Callable[[], CombinatorialUCBBidding],
-    env_builder: Callable[[], Environment],
-    config: SimulationConfig,
-    n_trials: int,
-) -> AggregatedSimulationResult:
-    cumulative_regrets = np.zeros((n_trials, config.num_rounds))
-    total_baseline_rewards = np.zeros((n_trials, config.num_rounds))
-    total_agent_rewards = np.zeros((n_trials, config.num_rounds))
-    budget_depleted_rounds = np.zeros(n_trials, dtype=int)
-    N_items = len(config.prices_per_item)
-    baseline_prices_per_item = np.zeros((n_trials, N_items))
-    mean_arm_freq_per_item = [dict() for _ in range(N_items)]
-
-    for i in range(n_trials):
-        print(f"Running trial {i+1}")
-        agent = agent_builder()
-        env = env_builder()
-        sim_res = run_simulation(agent, env, config)
-
-        regret = sim_res.baseline_rewards - sim_res.agent_reward_sums
-        cumulative_regrets[i] = np.cumsum(regret)
-        total_baseline_rewards[i] = sim_res.baseline_rewards
-        total_agent_rewards[i] = sim_res.agent_reward_sums
-        budget_depleted_rounds[i] = sim_res.budget_depleted_round
-        baseline_prices_per_item[i] = np.array(sim_res.baseline_price_per_item)
-        for i in range(N_items):
-            for k, v in sim_res.arm_freq_per_item[i].items():
-                if k not in mean_arm_freq_per_item[i]:
-                    mean_arm_freq_per_item[i][k] = 0
-                mean_arm_freq_per_item[i][k] += v
-
-    for i in range(N_items):
-        for k in mean_arm_freq_per_item[i]:
-            mean_arm_freq_per_item[i][k] /= n_trials
-
-    return AggregatedSimulationResult(
-        cumulative_regrets=cumulative_regrets,
-        mean_arm_freq_per_item=mean_arm_freq_per_item,
-        total_baseline_rewards=total_baseline_rewards,
-        total_agent_rewards=total_agent_rewards,
-        budget_depleted_mean_round=budget_depleted_rounds.mean(),
-        baseline_prices_per_item=baseline_prices_per_item,
+    
+    agent_builder = create_agent_builder(experiment_config)
+    
+    # Run one simulation with time series tracking for animation
+    print("Running single simulation with time tracking for animation...")
+    agent = agent_builder()
+    env = env_builder()
+    single_result = run_single_simulation(agent, env, experiment_config, track_time_series=True)
+    
+    # Create animated histogram
+    if single_result.time_series_data:
+        print("Generating animated histogram...")
+        baseline_prices = np.array(single_result.baseline_price_per_item)
+        create_animated_histogram(
+            single_result.time_series_data,
+            baseline_prices,
+            experiment_config.price_range,
+            output_filename="agent_prices.gif",
+            fps=2
+        )
+    
+    # Run full simulation for comprehensive results
+    print("Running full simulation...")
+    result = simulate(
+        agent_builder=agent_builder,
+        env_builder=env_builder,
+        config=experiment_config,
     )
+    
+    # Visualize final results
+    print("\nGenerating final plots...")
+    plot_statistics(result, rounds_per_trial=experiment_config.time_horizon, 
+                   n_trials=experiment_config.num_trials,
+                   initial_budget=experiment_config.budget)
+    
+    print("Simulation with animation completed successfully!")
 
 
-# --- Plotting utilities ---
-
-
-def show_regret(cumulative_regrets: np.ndarray, rounds_per_trial: int, n_trials: int):
-    avg_regret = cumulative_regrets.mean(axis=0)
-    sd_regret = cumulative_regrets.std(axis=0)
-    x = np.arange(rounds_per_trial)
-    plt.plot(x, avg_regret, label="Average Regret")
-    plt.fill_between(
-        x,
-        avg_regret - sd_regret / np.sqrt(n_trials),
-        avg_regret + sd_regret / np.sqrt(n_trials),
-        alpha=0.3,
-        label="Uncertainty",
+def run_experiment() -> None:
+    """
+    Execute the complete simulation experiment.
+    """
+    print("Starting combinatorial pricing simulation...")
+    print("=" * 60)
+    
+    setup_reproducible_environment()
+    
+    experiment_config = create_multi_item_experiment_config()
+    
+    print(f"Number of items: {experiment_config.num_items}")
+    print_experiment_summary(experiment_config)
+    print("=" * 60)
+    
+    # Create builders
+    env_builder = create_environment_builder(
+        experiment_config.environment, 
+        experiment_config.time_horizon
     )
-    plt.xlabel("t")
-    plt.title("Cumulative Regret")
-    plt.legend()
-
-
-def show_cumulative_rewards(
-    total_baseline_rewards: np.ndarray,
-    rounds_per_trial: int,
-    total_agent_rewards: np.ndarray,
-    budget_depleted_mean_round: float,
-):
-    cum_base = total_baseline_rewards.cumsum(axis=1)
-    cum_agent = total_agent_rewards.cumsum(axis=1)
-    x = np.arange(rounds_per_trial)
-    plt.plot(x, cum_base.mean(axis=0), label="Average Baseline")
-    plt.plot(x, cum_agent.mean(axis=0), label="Average Agent")
-    plt.axvline(
-        budget_depleted_mean_round,
-        color="red",
-        linestyle="--",
-        label="Avg Budget Depletion",
+    
+    agent_builder = create_agent_builder(experiment_config)
+    
+    # Run simulation
+    print("Starting simulation...")
+    result = simulate(
+        agent_builder=agent_builder,
+        env_builder=env_builder,
+        config=experiment_config,
     )
-    plt.xlabel("t")
-    plt.title("Cumulative Rewards")
-    plt.legend()
-
-
-def show_histogram(result: AggregatedSimulationResult):
-    # Create separate histograms for each product/item based on mean_arm_freq_per_item
-    n_items = len(result.mean_arm_freq_per_item)
-
-    # Create subplots for each item
-    fig, axes = plt.subplots(1, n_items, figsize=(5 * n_items, 4))
-
-    # Handle single item case
-    if n_items == 1:
-        axes = [axes]
-
-    baseline_price_per_item = result.baseline_prices_per_item.mean(axis=0)
-
-    for item_idx in range(n_items):
-        # Get the dictionary for this item
-        item_freq_dict = result.mean_arm_freq_per_item[item_idx]
-
-        if item_freq_dict:  # Check if dictionary is not empty
-            # Extract rewards (keys) and frequencies (values)
-            rewards = list(item_freq_dict.keys())
-            frequencies = list(item_freq_dict.values())
-
-            ax = axes[item_idx]
-            ax.bar(rewards, frequencies, width=0.7, alpha=0.7)
-            ax.set_xlabel("Reward")
-            ax.set_ylabel("Mean Frequency")
-            ax.set_title(f"Arm Frequencies for Item {item_idx + 1}")
-            ax.grid(True, alpha=0.3)
-
-            # Add best price line
-            best_price = baseline_price_per_item[item_idx]
-            ax.axvline(
-                x=best_price,
-                color="r",
-                linestyle="--",
-                label=f"Best Price: {best_price:.2f}",
-            )
-            ax.legend()
-        else:
-            # Handle empty dictionary case
-            ax = axes[item_idx]
-            ax.set_xlabel("Reward")
-            ax.set_ylabel("Mean Frequency")
-            ax.set_title(f"Arm Frequencies for Item {item_idx + 1} (No Data)")
-            ax.grid(True, alpha=0.3)
-
-            # Add best price line even for empty data
-            best_price = baseline_price_per_item[item_idx]
-            ax.axvline(
-                x=best_price,
-                color="r",
-                linestyle="--",
-                label=f"Best Price: {best_price:.2f}",
-            )
-            ax.legend()
-
-    plt.tight_layout()
-
-
-def plot_statistics(
-    result: AggregatedSimulationResult, rounds_per_trial: int, n_trials: int
-):
-    print(
-        f"Average budget depleted round: {result.budget_depleted_mean_round}")
-    print(f"Average final regret: {result.cumulative_regrets[:, -1].mean()}")
-    print(
-        f"Mean of baseline best prices per item (averaged over trials): {result.baseline_prices_per_item.mean(axis=0)}"
+    
+    # Plot configuration
+    plotting_config = PlottingConfig(
+        figure_size=(15, 10),
+        dpi=150,
+        save_plots=True,
+        show_plots=True,
+        output_filename="simulation_results.png"
     )
-    plt.figure(figsize=(15, 10))
-    plt.subplot(2, 2, 1)
-    show_regret(result.cumulative_regrets, rounds_per_trial, n_trials)
-    plt.subplot(2, 2, 2)
-    show_cumulative_rewards(
-        result.total_baseline_rewards,
-        rounds_per_trial,
-        result.total_agent_rewards,
-        result.budget_depleted_mean_round,
-    )
-    plt.subplot(2, 2, 3)
-    show_histogram(result)
-    plt.tight_layout()
-    plt.savefig("simulation_results.png", dpi=150, bbox_inches="tight")
-    print("Plot saved as 'simulation_results.png'")
-    plt.show()  # Comment out to avoid display issues
+    
+    # Visualize results
+    print("\nGenerating comprehensive plots...")
+    plot_statistics(result, rounds_per_trial=experiment_config.time_horizon, 
+                   n_trials=experiment_config.num_trials,
+                   initial_budget=experiment_config.budget)
+    
+    print("Simulation completed successfully!")
 
 
-# --- Example experiment setup ---
-
-n_trials = 10  # reduce for speed testing
-
-# T = 700
-# B = 300
-
-T = 1400  # reduce for speed testing
-B = 300  # reduce for speed testing
-N_items = 3
-P = list(range(5, 41, 5))  # price set shared by all items
-prices_per_item = [P for _ in range(N_items)]
-
-simulation_config = SimulationConfig(
-    num_rounds=T, prices_per_item=prices_per_item, total_budget=B
-)
-
-# Environment builder: specify mean & std per item
-means = [10, 15, 20]
-stds = [4, 5, 6]
-
-
-def env_builder(): return Environment(mean=means, std=stds, T=T)
-
-
-def agent_builder(): return CombinatorialUCBBidding(
-    num_items=N_items, price_set=P, B=B, T=T, beta=0.2
-)
-
-
-result = simulate(
-    agent_builder=agent_builder,
-    env_builder=env_builder,
-    config=simulation_config,
-    n_trials=n_trials,
-)
-plot_statistics(result, rounds_per_trial=T, n_trials=n_trials)
+if __name__ == "__main__":
+    run_experiment_with_animation()
