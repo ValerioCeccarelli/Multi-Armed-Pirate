@@ -24,15 +24,6 @@ class EnvironmentConfig:
     means: List[float]
     stds: List[float]
     
-    def __post_init__(self):
-        """Validate the environment configuration."""
-        if not self.means or not self.stds:
-            raise ValueError("Means and stds lists cannot be empty")
-        if len(self.means) != len(self.stds):
-            raise ValueError("Means and stds lists must have the same length")
-        if any(s <= 0 for s in self.stds):
-            raise ValueError("All standard deviations must be positive")
-    
     @property
     def num_items(self) -> int:
         """Number of configured items."""
@@ -58,6 +49,7 @@ class ExperimentConfig:
     num_trials: int
     exploration_param: float
     environment: EnvironmentConfig
+    num_intervals: int = -1
     
     def __post_init__(self):
         """Validate the experiment configuration."""
