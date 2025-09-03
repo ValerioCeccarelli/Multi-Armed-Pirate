@@ -64,7 +64,7 @@ def create_multi_item_experiment_config() -> ExperimentConfig:
     # num_items = 3 is automatically inferred from list length
     l = []
     for _ in range(10):
-        l.extend([5, 100])
+        l.extend([10, 20])
 
     s = []
     for _ in range(10):
