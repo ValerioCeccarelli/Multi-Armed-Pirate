@@ -168,6 +168,7 @@ def run_experiment_with_animation() -> None:
     print("Running single simulation with time tracking for animation...")
     agent = agent_builder()
     env = env_builder()
+    # TODO: qui facciamo una run a vuoto solo per generare una gif
     single_result = run_single_simulation(agent, env, experiment_config, track_time_series=True)
     
     # Create animated histogram
