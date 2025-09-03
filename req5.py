@@ -25,33 +25,6 @@ def setup_reproducible_environment(seed: int = 42) -> None:
     np.random.seed(seed)
 
 
-def create_experiment_config() -> ExperimentConfig:
-    """
-    Create complete configuration for the experiment.
-    
-    Returns:
-        Experiment configuration
-    """
-    # Environment configuration
-    # Number of items is automatically inferred from the length of means and stds
-    env_config = EnvironmentConfig(
-        means=[25],  # Valuation means for each item
-        stds=[10],    # Standard deviations for each item
-    )
-    
-    # Complete experiment configuration
-    # num_items is automatically inferred from env_config.num_items (= len(means) = len(stds))
-    experiment_config = ExperimentConfig(
-        time_horizon=1400,
-        budget=300,
-        price_range=list(range(5, 41, 5)),  # Prices from 5 to 40 with step 5
-        num_trials=10,
-        exploration_param=0.2,
-        environment=env_config
-    )
-    
-    return experiment_config
-
 
 def create_multi_item_experiment_config() -> ExperimentConfig:
     """
