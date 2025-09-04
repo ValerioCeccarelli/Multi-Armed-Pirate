@@ -3,6 +3,32 @@ from scipy.optimize import milp, LinearConstraint
 import numpy as np
 from typing import Optional
 from collections import deque
+from abc import ABC, abstractmethod
+
+
+class Agent(ABC):
+    """
+    Base class for all agents.
+    """
+    @abstractmethod
+    def select_prices(self) -> list[float]:
+        """
+        Select prices for the items.
+        """
+        pass
+
+    @abstractmethod
+    def update(self, prices: list[float], rewards: list[float], costs: list[float]):
+        """
+        Update the agent's knowledge based on the observed rewards and costs.
+        """
+        pass
+    
+    @property
+    @abstractmethod
+    def price_set(self) -> list[float]:
+        """Return the price set."""
+        pass
 
 
 class CombinatorialUCBBidding:
@@ -296,6 +322,11 @@ class PrimalDualAgent:
 
         # RNG
         self._rng = np.random.default_rng()
+
+    @property
+    def price_set(self) -> list[float]:
+        """Return the price set."""
+        return self.P
 
     def _distributions(self) -> np.ndarray:
         """Return current action distributions per item, with exploration mixing."""

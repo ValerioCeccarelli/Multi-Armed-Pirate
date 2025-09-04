@@ -375,15 +375,15 @@ def generate_comprehensive_plots(result: AggregatedSimulationResult,
     # Print summary statistics
     print_simulation_summary(result)
     
-    # Create main figure with 2x3 layout for comprehensive analysis
-    fig = plt.figure(figsize=(18, 12))
+    # Create main figure with 2x2 layout for comprehensive analysis
+    fig = plt.figure(figsize=(12, 12))
     
     # Subplot 1: Cumulative regret
-    plt.subplot(2, 3, 1)
+    plt.subplot(2, 2, 1)
     plot_cumulative_regret(result.cumulative_regrets, rounds_per_trial, n_trials)
     
     # Subplot 2: Cumulative rewards
-    plt.subplot(2, 3, 2)
+    plt.subplot(2, 2, 2)
     plot_cumulative_rewards(
         result.total_baseline_rewards,
         result.total_agent_rewards,
@@ -392,20 +392,12 @@ def generate_comprehensive_plots(result: AggregatedSimulationResult,
     )
     
     # Subplot 3: Conversion rates
-    plt.subplot(2, 3, 3)
+    plt.subplot(2, 2, 3)
     plot_conversion_rates(result)
     
     # Subplot 4: Budget evolution
-    plt.subplot(2, 3, 4)
+    plt.subplot(2, 2, 4)
     plot_budget_evolution(result, initial_budget)
-    
-    # Subplot 5: Performance metrics
-    plt.subplot(2, 3, 5)
-    plot_performance_metrics(result)
-    
-    # Subplot 6: Price frequency histograms
-    plt.subplot(2, 3, 6)
-    plot_price_frequency_histograms(result)
     
     plt.tight_layout()
     
@@ -414,6 +406,10 @@ def generate_comprehensive_plots(result: AggregatedSimulationResult,
         print(f"Plot saved as '{config.output_filename}'")
     
     if config.show_plots:
+        plt.show()
+
+        # Histograms of price frequencies
+        plot_price_frequency_histograms(result)
         plt.show()
 
 
@@ -558,10 +554,11 @@ def create_animated_histogram(time_series_data, baseline_prices: np.ndarray,
                         blit=True, repeat=True)
     
     # Save as GIF
-    print(f"Saving animation as '{output_filename}'...")
-    writer = PillowWriter(fps=fps)
-    anim.save(output_filename, writer=writer)
-    print(f"Animation saved successfully!")
+    # TODO: Uncomment to enable saving
+    # print(f"Saving animation as '{output_filename}'...")
+    # writer = PillowWriter(fps=fps)
+    # anim.save(output_filename, writer=writer)
+    # print(f"Animation saved successfully!")
     
     plt.close(fig)
 
