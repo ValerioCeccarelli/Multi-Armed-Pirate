@@ -1,3 +1,4 @@
+import itertools
 from scipy.optimize import milp, LinearConstraint
 import numpy as np
 from typing import Optional
@@ -643,6 +644,123 @@ class SlidingWindowUCBBidding:
         """Alias for update_statistics for compatibility."""
         return self.update_statistics(chosen_price_indices, rewards, costs)
 
+
+class FixedActionBaselineAgent:
+    def __init__(self, num_items: int, price_set: list[float], budget: int,
+                 time_horizon: int, valuations: np.ndarray):
+        """
+        Args:
+            num_items: number of item types (N)
+            price_set: discrete, shared price set across items (arms)
+            budget: total number of allowed purchases across horizon (B)
+            time_horizon: number of rounds (T)
+            valuations: matrix shape (N, T) with valuation for (item, round)
+        """
+        self.num_items = int(num_items)
+        self.price_set = list(price_set)
+        self.num_prices = len(self.price_set)
+        self.initial_budget = int(budget)
+        self.remaining_budget = int(budget)
+        self.time_horizon = int(time_horizon)
+
+        self.current_round = 0
+        self.last_chosen_price_indices = np.zeros(self.num_items, dtype=int)
+
+        valuations = np.asarray(valuations, dtype=float)
+        assert valuations.shape == (self.num_items, self.time_horizon), "valuations must be shape (num_items, time_horizon)"
+        self._valuations = valuations
+
+        optimal_prices = self.calculate_baseline_performance(
+            self._valuations, self.price_set, self.initial_budget)
+        
+        print("FixedActionBaselineAgent optimal prices:", optimal_prices)
+
+        self.optimal_indexes = np.array([
+            self.price_set.index(p) if p in self.price_set else 0 for p in optimal_prices
+        ], dtype=int)
+                
+
+    def calculate_baseline_performance(self, valuations: np.ndarray, prices: list[float], budget: int) -> list[float]:
+        """
+        Calculate optimal baseline performance for the given environment.
+        
+        The baseline represents the best possible fixed pricing strategy,
+        calculated with perfect knowledge of future valuations.
+        
+        Args:
+            env: Simulation environment
+            
+        Returns:
+            list of optimal prices for each item
+        """
+        num_items = valuations.shape[0]
+
+        best_prices = []
+        best_total_reward = -1
+
+        # Generate all possible price combinations for items
+        all_price_combinations = list(itertools.product(*([prices]*num_items)))
+
+        for price_combination in all_price_combinations:
+            prices_array = np.array(price_combination)
+            
+            # Calculate performance for this price combination
+            total_reward = self._evaluate_price_combination(
+                valuations, prices_array, budget, num_items
+            )
+
+            if total_reward > best_total_reward:
+                best_total_reward = total_reward
+                best_prices = price_combination
+
+        return best_prices
+    
+    def _evaluate_price_combination(self, valuations: np.ndarray, prices: np.ndarray, 
+                               total_budget: int, num_items: int) -> float:
+        """
+        Evaluate a specific price combination.
+        
+        Args:
+            env: Simulation environment
+            prices: Array of prices for each item
+            total_budget: Total available budget
+            num_items: Number of items
+            
+        Returns:
+            float total reward
+        """
+        # Mask where valuations are >= prices (purchases)
+        purchase_mask = valuations >= prices[:, np.newaxis]
+        
+        # Rewards matrix (price * purchase)
+        rewards_matrix = purchase_mask * prices[:, np.newaxis]
+        
+        # Cumulative cost over time (number of purchases)
+        cumulative_purchases = np.cumsum(purchase_mask.sum(axis=0))
+        
+        # Apply budget constraint
+        budget_constraint = cumulative_purchases <= (total_budget - num_items)
+        
+        # Calculate total rewards for each round
+        rewards_per_round = rewards_matrix.sum(axis=0) * budget_constraint
+        total_reward = rewards_per_round.sum()
+        
+        return total_reward
+
+    def select_prices(self) -> np.ndarray:
+        """Return the scheduled price index for each item at current_round."""
+        t = self.current_round
+        if t < 0 or t >= self.time_horizon:
+            raise IndexError("current_round out of bounds")
+        
+        indices = self.optimal_indexes
+        self.last_chosen_price_indices = indices
+        return indices
+
+    # Compatibility alias
+    def update(self, chosen_price_indices: np.ndarray, rewards: np.ndarray,
+               costs: np.ndarray) -> None:
+        self.current_round += 1
 
 class IntervalAwareBaselineAgent:
     """
