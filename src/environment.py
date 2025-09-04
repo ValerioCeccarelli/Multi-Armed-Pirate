@@ -1,5 +1,13 @@
 import numpy as np
-from typing import List
+from typing import List, NamedTuple
+
+
+class IntervalInfo(NamedTuple):
+    """Informazioni su un intervallo dell'ambiente non stazionario."""
+    start_round: int
+    end_round: int
+    means: List[float]
+    stds: List[float]
 
 
 class Environment:
@@ -121,9 +129,19 @@ class AbruptSlightlyNonstationaryEnvironment:
         assert len(mean[0]) == len(std[0]), "All means and stds lists must have the same length"
         assert time_horizon % num_intervals == 0, "Time horizon must be divisible by number of intervals"
 
+        self.num_intervals = num_intervals
         self.interval_duration = time_horizon // num_intervals
         self.mean_valuations = np.array(mean)
         self.std_valuations = np.array(std)
+
+        # Crea lista di intervalli per compatibilità con il test
+        self.intervals = []
+        for i in range(num_intervals):
+            start_round = i * self.interval_duration
+            end_round = (i + 1) * self.interval_duration
+            interval_means = [mean[j][i] for j in range(self.num_items)]
+            interval_stds = [std[j][i] for j in range(self.num_items)]
+            self.intervals.append(IntervalInfo(start_round, end_round, interval_means, interval_stds))
 
         valuations = [[] for _ in range(self.num_items)]
         for i in range(num_intervals):
@@ -160,6 +178,36 @@ class AbruptSlightlyNonstationaryEnvironment:
     def round(self, t: int, prices_t: List[float]) -> List[bool]:
         """Alias for get_purchase_decisions for compatibility."""
         return self.get_purchase_decisions(t, prices_t)
+    
+    def get_current_interval_info(self, round_idx: int) -> IntervalInfo:
+        """
+        Ottieni informazioni sull'intervallo corrente per un dato round.
+        
+        Args:
+            round_idx: Indice del round corrente
+            
+        Returns:
+            IntervalInfo con i dati dell'intervallo corrente
+        """
+        if round_idx < 0 or round_idx >= self.time_horizon:
+            raise IndexError(f"Round index {round_idx} out of range [0, {self.time_horizon-1}]")
+        
+        interval_idx = round_idx // self.interval_duration
+        return self.intervals[interval_idx]
+    
+    def get_interval_summary(self) -> str:
+        """
+        Ottieni un riassunto testuale degli intervalli dell'ambiente.
+        
+        Returns:
+            Stringa con il riassunto degli intervalli
+        """
+        summary = f"Ambiente non stazionario con {self.num_intervals} intervalli:\n"
+        for i, interval in enumerate(self.intervals):
+            summary += f"  Intervallo {i+1} (rounds {interval.start_round}-{interval.end_round-1}):\n"
+            summary += f"    Means: {[f'{m:.2f}' for m in interval.means]}\n"
+            summary += f"    Stds:  {[f'{s:.2f}' for s in interval.stds]}\n"
+        return summary
 
 
 if __name__ == "__main__":

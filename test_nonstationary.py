@@ -216,7 +216,7 @@ def plot_performance_comparison(results: Dict, env: AbruptSlightlyNonstationaryE
     
     # Subplot 2: Reward per round (moving average)
     plt.subplot(2, 2, 2)
-    window = 50
+    window = 10
     for agent_key, result in results.items():
         rewards = result['total_rewards']
         if len(rewards) >= window:
@@ -265,21 +265,58 @@ def plot_performance_comparison(results: Dict, env: AbruptSlightlyNonstationaryE
     plt.legend()
     plt.grid(True, alpha=0.3)
     
-    # Subplot 4: Distribuzione dei reward
+    # Subplot 4: Efficienza di adattamento agli intervalli
     plt.subplot(2, 2, 4)
-    for agent_key, result in results.items():
-        rewards = result['total_rewards']
-        # Rimuovi zeri per una migliore visualizzazione
-        non_zero_rewards = [r for r in rewards if r > 0]
-        if non_zero_rewards:
-            plt.hist(non_zero_rewards, bins=20, alpha=0.6, 
-                    label=result['agent_name'], density=True)
     
-    plt.xlabel('Reward per Round')
-    plt.ylabel('Densità')
-    plt.title('Distribuzione Reward (esclusi zeri)')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    # Calcola l'efficienza di adattamento per ogni agente
+    # Misura quanto velocemente si adattano ai cambiamenti di intervallo
+    adaptation_scores = {}
+    
+    for agent_key, result in results.items():
+        scores = []
+        rewards = result['total_rewards']
+        
+        # Per ogni transizione di intervallo, misura quanto velocemente migliora
+        for i, interval in enumerate(env.intervals[1:], 1):  # Skip primo intervallo
+            start_idx = interval.start_round
+            # Prendi i primi 20 round dell'intervallo (o tutti se meno di 20)
+            adaptation_window = min(20, interval.end_round - start_idx)
+            
+            if start_idx + adaptation_window <= len(rewards):
+                # Confronta primi 10 vs secondi 10 round dell'intervallo
+                first_half = rewards[start_idx:start_idx + adaptation_window//2]
+                second_half = rewards[start_idx + adaptation_window//2:start_idx + adaptation_window]
+                
+                if first_half and second_half:
+                    # Improvement rate: quanto migliorano dalla prima alla seconda metà
+                    first_avg = np.mean(first_half) if first_half else 0
+                    second_avg = np.mean(second_half) if second_half else 0
+                    improvement = second_avg - first_avg
+                    scores.append(improvement)
+        
+        if scores:
+            adaptation_scores[agent_key] = np.mean(scores)
+        else:
+            adaptation_scores[agent_key] = 0
+    
+    # Crea bar plot dell'efficienza di adattamento
+    agent_names = [results[key]['agent_name'] for key in adaptation_scores.keys()]
+    scores = list(adaptation_scores.values())
+    
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
+    bars = plt.bar(range(len(agent_names)), scores, 
+                   color=colors[:len(agent_names)], alpha=0.7)
+    
+    plt.xlabel('Agente')
+    plt.ylabel('Miglioramento Medio per Intervallo')
+    plt.title('Velocità di Adattamento ai Nuovi Intervalli')
+    plt.xticks(range(len(agent_names)), agent_names, rotation=45, ha='right')
+    plt.grid(True, alpha=0.3, axis='y')
+    
+    # Aggiungi valori sopra le barre
+    for bar, score in zip(bars, scores):
+        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(scores)*0.01,
+                f'{score:.2f}', ha='center', va='bottom', fontsize=9)
     
     plt.tight_layout()
     plt.savefig('nonstationary_comparison.png', dpi=150, bbox_inches='tight')

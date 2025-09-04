@@ -229,7 +229,7 @@ class CombinatorialUCBBidding:
                 self.average_costs[item_idx, price_idx]
             self.average_costs[item_idx, price_idx] += cost_diff / pull_count
 
-        assert np.any(c not in (0, 1) for c in costs)
+        assert np.all(c in (0, 1) for c in costs)
         self.remaining_budget -= np.sum(costs)
         self.current_round += 1
 
@@ -629,7 +629,7 @@ class SlidingWindowUCBBidding:
             )
 
         # Update budget and round counter
-        assert np.any(c not in (0, 1) for c in costs)
+        assert np.all(c in (0, 1) for c in costs)
         self.remaining_budget -= np.sum(costs)
         self.current_round += 1
 
