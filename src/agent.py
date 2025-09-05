@@ -39,6 +39,12 @@ class Agent(ABC):
         """Return the precomputed price index schedule. (item, round)"""
         pass
 
+    @property
+    @abstractmethod
+    def taken(self) -> np.ndarray:
+        """Return the precomputed matrix of 0/1 indicating if the item was taken at each round. (item, round)"""
+        pass
+
 
 class CombinatorialUCBBidding:
     """
@@ -333,6 +339,7 @@ class PrimalDualAgent:
         self._rng = np.random.default_rng()
 
         self.schedule = np.ones((self.N, self.T), dtype=int) * -1
+        self.taken = np.zeros((self.N, self.T), dtype=int)
 
     @property
     def price_set(self) -> list[float]:
@@ -380,6 +387,7 @@ class PrimalDualAgent:
         """
 
         self.schedule[:, self.t] = chosen_price_indices
+        self.taken[:, self.t] = costs
 
         # Sanity cast
         chosen_price_indices = np.asarray(chosen_price_indices, dtype=int)
@@ -850,11 +858,17 @@ class IntervalAwareBaselineAgent:
 
         # Precompute the schedule of price indices per (item, round)
         self._schedule = self._build_schedule()
+        self._taken = np.zeros((self.num_items, self.time_horizon), dtype=int)
 
     @property
     def schedule(self) -> np.ndarray:
         """Return the precomputed price index schedule. (item, round)"""
         return self._schedule
+
+    @property
+    def taken(self) -> np.ndarray:
+        """Return the precomputed matrix of 0/1 indicating if the item was taken at each round. (item, round)"""
+        return self._taken
 
     def _build_schedule(self) -> np.ndarray:
         # Build list of (valuation, item, round)
@@ -898,6 +912,7 @@ class IntervalAwareBaselineAgent:
     def update(self, chosen_price_indices: np.ndarray, rewards: np.ndarray,
                costs: np.ndarray) -> None:
         self.current_round += 1
+        self._taken[:, self.current_round - 1] = costs
 
 
 if __name__ == "__main__":

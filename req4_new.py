@@ -3,23 +3,18 @@ from dataclasses import dataclass
 from typing import Callable
 from matplotlib import pyplot as plt
 import numpy as np
-from src.core import BudgetDepletedException, TimeSeriesData, _aggregate_price_frequencies, _aggregate_success_failure_frequencies, _normalize_price_frequencies, _normalize_success_failure_frequencies, _update_price_frequencies, _update_success_failure_frequencies
+from src.core import TimeSeriesData, _aggregate_price_frequencies, _aggregate_success_failure_frequencies, _normalize_price_frequencies, _normalize_success_failure_frequencies, _update_price_frequencies, _update_success_failure_frequencies
 from src.environment import AbruptSlightlyNonstationaryEnvironment, Environment
-from src.agent import Agent, PrimalDualAgent, IntervalAwareBaselineAgent
+from src.agent import Agent, PrimalDualAgent, IntervalAwareBaselineAgent, BudgetDepletedException
 from src.plotting import plot_cumulative_regret, plot_cumulative_rewards
 
-
-
-
-
-means = [[3, 50, 7], [10, 150, 20]]
-stds = [[1, 2, 3], [4, 5, 6]]
-time_horizon = 30
-num_intervals = 3
+means = [[10, 30, 10], [40, 10, 40]]
+stds = [[5,5,5], [5,5,5]]
+time_horizon = 3000
 num_items = len(means)
 
-prices = list(range(5, 41, 5))
-budget = 30
+prices = list(range(5, 41, 1))
+budget = time_horizon / 2
 
 num_trials=10
 
@@ -67,6 +62,8 @@ class RunSimulationResult:
     success_frequencies: list[dict[float, int]]
     failure_frequencies: list[dict[float, int]]
     agent_rewards: list[float]
+    agent_schedule: np.ndarray # shape (num_items, time_horizon)
+    agent_taken: np.ndarray # shape (num_items, time_horizon) value 0/1
 
 def run_simulation(agent, env) -> RunSimulationResult:
     num_items = env.num_items
@@ -134,6 +131,8 @@ def run_simulation(agent, env) -> RunSimulationResult:
         success_frequencies=success_frequencies,
         failure_frequencies=failure_frequencies,
         agent_rewards=agent_rewards,
+        agent_schedule=agent.schedule,
+        agent_taken=agent.taken,
     )
 
 @dataclass
@@ -166,6 +165,12 @@ class RunMultipleSimulationsResult:
 
     budget_depleted_rounds: np.ndarray # shape (num_trials,)
 
+    agent_schedules: np.ndarray # shape (num_trials, num_items, time_horizon)
+    baseline_schedules: np.ndarray # shape (num_trials, num_items, time_horizon)
+
+    agent_taken: np.ndarray # shape (num_trials, num_items, time_horizon) value 0/1
+    baseline_taken: np.ndarray # shape (num_trials, num_items, time_horizon) value 0/1
+
 
 def run_multiple_simulations(agent_builder: Callable[[Environment], Agent], baseline_builder: Callable[[Environment], Agent], env_builder: Callable[[], Environment], num_trials: int) -> RunMultipleSimulationsResult:
     tmp_env = env_builder()
@@ -185,6 +190,12 @@ def run_multiple_simulations(agent_builder: Callable[[Environment], Agent], base
     agent_rewards_per_round = np.zeros((num_trials, time_horizon))
     budget_depleted_rounds = np.zeros(num_trials, dtype=int)
 
+    agent_schedules = np.zeros((num_trials, num_items, time_horizon), dtype=int)
+    baseline_schedules = np.zeros((num_trials, num_items, time_horizon), dtype=int)
+
+    agent_taken = np.zeros((num_trials, num_items, time_horizon), dtype=int)
+    baseline_taken = np.zeros((num_trials, num_items, time_horizon), dtype=int)
+
     # Run multiple simulations
     for trial_idx in range(num_trials):
         print(f"Running trial {trial_idx + 1}/{num_trials}")
@@ -203,6 +214,12 @@ def run_multiple_simulations(agent_builder: Callable[[Environment], Agent], base
         agent_rewards_per_round[trial_idx] = agent_result.agent_rewards
 
         budget_depleted_rounds[trial_idx] = agent_result.budget_depleted_round
+
+        agent_schedules[trial_idx] = agent_result.agent_schedule
+        baseline_schedules[trial_idx] = baseline_result.agent_schedule
+
+        agent_taken[trial_idx] = agent_result.agent_taken
+        baseline_taken[trial_idx] = baseline_result.agent_taken
 
         _aggregate_price_frequencies(agent_aggregated_price_frequencies, agent_result.price_frequencies, num_items)
         _aggregate_success_failure_frequencies(agent_aggregated_success_frequencies, agent_result.success_frequencies, num_items)
@@ -231,6 +248,10 @@ def run_multiple_simulations(agent_builder: Callable[[Environment], Agent], base
         baseline_success_frequencies=baseline_aggregated_success_frequencies,
         baseline_failure_frequencies=baseline_aggregated_failure_frequencies,
         budget_depleted_rounds=budget_depleted_rounds,
+        agent_schedules=agent_schedules,
+        baseline_schedules=baseline_schedules,
+        agent_taken=agent_taken,
+        baseline_taken=baseline_taken,
     )
 
 results = run_multiple_simulations(agent_builder, baseline_builder, env_builder, num_trials)
@@ -306,7 +327,8 @@ def plot_price_frequency_histograms(
     fig.tight_layout()
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
-    plt.show()
+    # Do not call plt.show() here to avoid blocking; caller will decide when to show
+    return fig
 
 def plot_conversion_rates(
         success_freqs: list[dict[float, float]], 
@@ -355,6 +377,7 @@ def plot_budget_evolution(
         agent_rewards: np.ndarray,
         initial_budget: int,
 ):
+    print(f"Average budget depletion round: {budget_depleted_round}")
     ax = plt.gca()
 
     num_trials, num_rounds = agent_rewards.shape
@@ -433,12 +456,91 @@ def plot_summary_metrics(
 
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
-    plt.show()
+    # Do not call plt.show() here to avoid blocking; caller will decide when to show
+    return fig
 
-plot_price_frequency_histograms(
-    results.agent_success_frequencies,
-    results.agent_failure_frequencies,
-)
+
+agent_schedule = results.agent_schedules[0]
+agent_taken = results.agent_taken[0]
+
+def plot_histogram_per_interval(schedule: np.ndarray, taken: np.ndarray, num_intervals: int):
+    """
+    Plot a single figure with a grid of subplots shaped (num_intervals x num_items).
+    Each row corresponds to an interval of rounds; each column to an item. Bars are
+    stacked (success on top of failure) and aligned by price.
+    """
+    num_items, time_horizon = schedule.shape
+    rounds_per_interval = time_horizon // num_intervals
+
+    # Create a single figure for all intervals and items
+    fig, axesx = plt.subplots(num_intervals, num_items, figsize=(5 * num_items, 4 * num_intervals))
+
+    # Ensure axesx is always a 2D array for consistent indexing
+    if num_intervals == 1 and num_items == 1:
+        axesx = np.array([[axesx]])
+    elif num_intervals == 1:
+        axesx = np.array([axesx])
+    elif num_items == 1:
+        axesx = np.array([[ax] for ax in axesx])
+
+    for interval_index in range(num_intervals):
+        start_round = interval_index * rounds_per_interval
+        end_round = (interval_index + 1) * rounds_per_interval if interval_index < num_intervals - 1 else time_horizon
+
+        interval_schedule = schedule[:, start_round:end_round]
+        interval_taken = taken[:, start_round:end_round]
+
+        for item_idx in range(num_items):
+            current_ax = axesx[interval_index, item_idx]
+            item_prices = interval_schedule[item_idx]
+            item_taken = interval_taken[item_idx]
+
+            success_dict: dict = {}
+            failure_dict: dict = {}
+
+            for price, taken_flag in zip(item_prices, item_taken):
+                if taken_flag == 1:
+                    success_dict[price] = success_dict.get(price, 0) + 1
+                else:
+                    failure_dict[price] = failure_dict.get(price, 0) + 1
+
+            # remove -1 keys if present
+            success_dict.pop(-1, None)
+            failure_dict.pop(-1, None)
+
+            # Align x across success/failure keys
+            all_prices = sorted(set(success_dict.keys()) | set(failure_dict.keys()))
+            success_vals = [success_dict.get(p, 0) for p in all_prices]
+            failure_vals = [failure_dict.get(p, 0) for p in all_prices]
+
+            # plot histogram where success and failure are stacked
+            bar_width = 0.6
+            current_ax.bar(all_prices, success_vals, width=bar_width,
+                           label='Successful Purchases', color='green', alpha=0.7)
+            current_ax.bar(all_prices, failure_vals, width=bar_width,
+                           label='Failed Purchases', color='pink', alpha=1, bottom=success_vals)
+
+            current_ax.set_xlabel("Price")
+            current_ax.set_ylabel("Frequency")
+            current_ax.set_title(f"Item {item_idx + 1} - Rounds {start_round + 1} to {end_round}")
+            current_ax.legend()
+
+    plt.tight_layout()
+    return fig
+
+plot_histogram_per_interval(agent_schedule, agent_taken, num_intervals=len(means[0]))
+
+    
+
+# plot_price_frequency_histograms(
+#     results.agent_success_frequencies,
+#     results.agent_failure_frequencies,
+# )
+
+# plot_price_frequency_histograms(
+#     results.baseline_success_frequencies,
+#     results.baseline_failure_frequencies,
+# )
 
 plot_summary_metrics(
     results.cumulative_regrets,
@@ -447,4 +549,7 @@ plot_summary_metrics(
     results.budget_depleted_rounds,
     save_path="summary_metrics.png"
 )
+
+# # Show all figures at once (single blocking call)
+plt.show()
 
