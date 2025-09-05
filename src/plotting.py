@@ -406,10 +406,9 @@ def generate_comprehensive_plots(result: AggregatedSimulationResult,
         print(f"Plot saved as '{config.output_filename}'")
     
     if config.show_plots:
-        plt.show()
-
         # Histograms of price frequencies
         plot_price_frequency_histograms(result)
+
         plt.show()
 
 
