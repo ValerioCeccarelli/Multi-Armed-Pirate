@@ -5,6 +5,9 @@ from typing import Optional
 from collections import deque
 from abc import ABC, abstractmethod
 
+class BudgetDepletedException(RuntimeError):
+    """Exception raised when the agent's budget is depleted."""
+    pass
 
 class Agent(ABC):
     """
@@ -28,6 +31,12 @@ class Agent(ABC):
     @abstractmethod
     def price_set(self) -> list[float]:
         """Return the price set."""
+        pass
+
+    @property
+    @abstractmethod
+    def schedule(self) -> np.ndarray:
+        """Return the precomputed price index schedule. (item, round)"""
         pass
 
 
@@ -323,6 +332,8 @@ class PrimalDualAgent:
         # RNG
         self._rng = np.random.default_rng()
 
+        self.schedule = np.ones((self.N, self.T), dtype=int) * -1
+
     @property
     def price_set(self) -> list[float]:
         """Return the price set."""
@@ -348,8 +359,7 @@ class PrimalDualAgent:
         Returns: np.ndarray shape (N,) of indices in [0, K_prices).
         """
         if self.remaining_budget <= 0:
-            # No budget, nothing to choose meaningfully; return any fixed action
-            return np.zeros(self.N, dtype=int)
+            raise BudgetDepletedException("No remaining budget to select prices.")
 
         probs = self._distributions()
         self.last_probs = probs
@@ -368,6 +378,9 @@ class PrimalDualAgent:
             rewards: realized revenue per item (shape (N,))
             costs: realized cost per item (0/1) (shape (N,))
         """
+
+        self.schedule[:, self.t] = chosen_price_indices
+
         # Sanity cast
         chosen_price_indices = np.asarray(chosen_price_indices, dtype=int)
         rewards = np.asarray(rewards, dtype=float)
@@ -703,8 +716,6 @@ class FixedActionBaselineAgent:
 
         optimal_prices = self.calculate_baseline_performance(
             self._valuations, self.price_set, self.initial_budget)
-        
-        print("FixedActionBaselineAgent optimal prices:", optimal_prices)
 
         self.optimal_indexes = np.array([
             self.price_set.index(p) if p in self.price_set else 0 for p in optimal_prices
@@ -787,6 +798,11 @@ class FixedActionBaselineAgent:
         indices = self.optimal_indexes
         self.last_chosen_price_indices = indices
         return indices
+    
+    @property
+    def schedule(self) -> np.ndarray:
+        """Return the fixed optimal price index schedule. (item, round)"""
+        return np.tile(self.optimal_indexes[:, np.newaxis], (1, self.time_horizon))
 
     # Compatibility alias
     def update(self, chosen_price_indices: np.ndarray, rewards: np.ndarray,
@@ -834,6 +850,11 @@ class IntervalAwareBaselineAgent:
 
         # Precompute the schedule of price indices per (item, round)
         self._schedule = self._build_schedule()
+
+    @property
+    def schedule(self) -> np.ndarray:
+        """Return the precomputed price index schedule. (item, round)"""
+        return self._schedule
 
     def _build_schedule(self) -> np.ndarray:
         # Build list of (valuation, item, round)

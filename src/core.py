@@ -3,13 +3,8 @@ from dataclasses import dataclass
 import itertools
 import numpy as np
 
-from .agent import CombinatorialUCBBidding
+from .agent import CombinatorialUCBBidding, BudgetDepletedException
 from .environment import Environment
-
-
-class BudgetDepletedException(RuntimeError):
-    """Exception raised when the agent's budget is depleted."""
-    pass
 
 
 @dataclass
