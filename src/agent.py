@@ -82,6 +82,9 @@ class CombinatorialUCBBidding:
         self.current_round = 0
         self.last_chosen_price_indices = np.zeros(self.num_items, dtype=int)
 
+        self.schedule = np.ones((self.num_items, self.time_horizon), dtype=int) * -1
+        self.taken = np.zeros((self.num_items, self.time_horizon), dtype=int)
+
     def select_prices(self) -> np.ndarray:
         """
         Select a price index for each of the item types.
@@ -252,6 +255,9 @@ class CombinatorialUCBBidding:
             rewards: Array of rewards received for each item
             costs: Array of costs incurred for each item
         """
+        self.schedule[:, self.current_round] = [self.price_set[x] for x in chosen_price_indices]
+        self.taken[:, self.current_round] = costs
+
         # Update statistics for each item
         for item_idx in range(self.num_items):
             price_idx = chosen_price_indices[item_idx]

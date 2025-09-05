@@ -5,18 +5,18 @@ from matplotlib import pyplot as plt
 import numpy as np
 from src.core import TimeSeriesData, _aggregate_price_frequencies, _aggregate_success_failure_frequencies, _normalize_price_frequencies, _normalize_success_failure_frequencies, _update_price_frequencies, _update_success_failure_frequencies
 from src.environment import AbruptSlightlyNonstationaryEnvironment, Environment
-from src.agent import Agent, PrimalDualAgent, IntervalAwareBaselineAgent, BudgetDepletedException
+from src.agent import Agent, PrimalDualAgent, IntervalAwareBaselineAgent, BudgetDepletedException, CombinatorialUCBBidding
 from src.plotting import plot_cumulative_regret, plot_cumulative_rewards
 
-means = [[10, 30, 10], [40, 10, 40]]
-stds = [[5,5,5], [5,5,5]]
+means = [[10, 30, 10], [40, 10, 40], [10, 10, 10], [5, 5, 5]]
+stds = [[5,5,5], [5,5,5], [5,5,5], [5,5,5]]
 time_horizon = 3000
 num_items = len(means)
 
-prices = list(range(5, 41, 1))
-budget = time_horizon / 2
+prices = list(range(5, 45, 4))
+budget = time_horizon
 
-num_trials=10
+num_trials=2
 
 def env_builder():
     return AbruptSlightlyNonstationaryEnvironment(
@@ -42,6 +42,13 @@ def agent_builder(env: Environment):
         T=time_horizon,
         beta=0.1,
     )
+    # return CombinatorialUCBBidding(
+    #     price_set=prices,
+    #     num_items=num_items,
+    #     budget=budget,
+    #     time_horizon=time_horizon,
+    #     exploration_param=10,
+    # )
 
 @dataclass
 class RunSimulationResult:
@@ -95,6 +102,7 @@ def run_simulation(agent, env) -> RunSimulationResult:
             ])
             costs = np.array(purchase_decisions, dtype=int)
             
+            # TODO: agenti come PrimalDualAgent vogliono prices_t mentre CombinatorialUCBBidding price_indexes
             agent.update(prices_t, rewards, costs)
 
             # Track statistics
@@ -419,6 +427,7 @@ def plot_summary_metrics(
         baseline_rewards: np.ndarray,
         agent_rewards: np.ndarray,
         depleted_budget_rounds: np.ndarray,
+        initial_budget: int,
         save_path: str = None):
     n_trials, rounds_per_trial = cumulative_regrets.shape
 
@@ -449,7 +458,7 @@ def plot_summary_metrics(
     plot_budget_evolution(
         depleted_budget_rounds.mean(),
         agent_rewards,
-        initial_budget=30
+        initial_budget=initial_budget
     )
 
     plt.tight_layout()
@@ -547,7 +556,7 @@ plot_summary_metrics(
     results.baseline_rewards_per_round,
     results.agent_rewards_per_round,
     results.budget_depleted_rounds,
-    save_path="summary_metrics.png"
+    initial_budget=budget,
 )
 
 # # Show all figures at once (single blocking call)
