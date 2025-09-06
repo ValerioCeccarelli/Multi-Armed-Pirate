@@ -117,8 +117,7 @@ def plot_price_frequency_histograms(
 
     Args:
         valuations: Valuations matrix (num_trials, num_items, time_horizon)
-        agents_played_arms: Played arms by agents (num_agents, num_trials,
-            num_items, time_horizon)
+        agents_played_arms: Played arms by agents (num_agents, num_trials, num_items, time_horizon)
         prices: Prices matrix (num_prices,)
         agents_names: Names of the agents (num_agents,)
         save_plot: Whether to save the plot to a file.
@@ -239,4 +238,85 @@ def plot_price_frequency_histograms(
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # adjust for suptitle
         if save_plot:
             plt.savefig(f"{save_path_prefix}_{agents_names[agent_idx]}.png")
+        plt.show()
+
+
+def plot_budget_evolution(
+    valuations: NDArray[np.float64],
+    agents_played_arms: NDArray[np.int64],
+    prices: NDArray[np.float64],
+    agents_names: list[str],
+    initial_budget: np.int64,
+    ax: plt.Axes = None,
+    save_plot: bool = False,
+    save_path_prefix: str = "budget_evolution",
+):
+    """Plots the evolution of budgets over time for each agent and item.
+
+    Args:
+        valuations: Valuations matrix (num_trials, num_items, time_horizon)
+        agents_played_arms: Played arms by agents (num_agents, num_trials, num_items, time_horizon)
+        prices: Prices matrix (num_prices,)
+        agents_names: Names of the agents (num_agents,)
+        initial_budget: Initial budget
+        ax: Matplotlib Axes to plot on. If None, creates a new figure and axes and
+            plots there.
+        save_plot: Whether to save the plot to a file.
+        save_path_prefix: Prefix for the path to save the plots to. Plots will be
+            saved as f"{save_path_prefix}_{agent_name}.png".
+    """
+    num_agents, num_trials, num_items, time_horizon = agents_played_arms.shape
+    assert valuations.shape == (num_trials, num_items, time_horizon), (
+        f"Expected valuations shape {(num_trials, num_items, time_horizon)}, got"
+        f" {valuations.shape}"
+    )
+    assert (
+        len(agents_names) == num_agents
+    ), f"Expected {num_agents} agent names, got {len(agents_names)}"
+
+    is_new_figure = ax is None
+    if is_new_figure:
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+    for agent_idx in range(num_agents):
+        remaining_budget = np.zeros((num_trials, time_horizon + 1))
+        remaining_budget[:, 0] = initial_budget
+        for t in range(time_horizon):
+            depleted_budget = np.zeros(num_trials)
+            for item_idx in range(num_items):
+                played_arms = agents_played_arms[agent_idx, :, item_idx, t]
+                valuations_t = valuations[:, item_idx, t]
+                valid_pulls = played_arms != -1
+                played_prices = np.where(valid_pulls, prices[played_arms], 0)
+                successful_purchases = np.where(
+                    valid_pulls & (played_prices <= valuations_t), 1, 0
+                )
+                depleted_budget += successful_purchases
+            remaining_budget[:, t + 1] = remaining_budget[:, t] - depleted_budget
+
+        mean_remaining_budget = np.mean(remaining_budget, axis=0)
+        std_remaining_budget = np.std(remaining_budget, axis=0)
+
+        ax.plot(
+            range(time_horizon + 1),
+            mean_remaining_budget,
+            label=agents_names[agent_idx],
+        )
+        ax.fill_between(
+            range(time_horizon + 1),
+            mean_remaining_budget - std_remaining_budget,
+            mean_remaining_budget + std_remaining_budget,
+            alpha=0.3,
+            label=f"{agents_names[agent_idx]} confidence interval",
+        )
+
+    ax.set_title("Budget Evolution Over Time")
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Remaining Budget")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    if is_new_figure:
+        if save_plot:
+            plt.savefig(f"{save_path_prefix}_budget_evolution.png")
         plt.show()

@@ -6,14 +6,17 @@ from numpy.typing import NDArray
 
 from agents import Agent, UCBAgent
 from environments import Environment, StochasticEnvironment
-from plotting import plot_cumulative_regret, plot_price_frequency_histograms
+from plotting import (
+    plot_budget_evolution,
+    plot_cumulative_regret,
+    plot_price_frequency_histograms,
+)
 
 
 @dataclass
 class RunSimulationResult:
     """
     Result of a single simulation run.
-
 
     Attributes:
         valuations: Valuations matrix (num_items, time_horizon)
@@ -30,12 +33,10 @@ def run_simulation(
     """
     Run a simulation of the agent interacting with the environment.
 
-
     Args:
         env: The environment instance.
         agent: The agent instance.
         prices: Prices array (num_prices,)
-
 
     Returns:
         RunSimulationResult: The result of the simulation containing valuations and played arms.
@@ -108,10 +109,10 @@ if __name__ == "__main__":
     for trial in range(num_trials):
         # New environment each trial to vary valuations across trials
         env = StochasticEnvironment(
-            distribution_func=StochasticEnvironment.gaussian_distribution(),
-            num_items=num_items,
+            distribution_functions=[
+                StochasticEnvironment.gaussian_distribution(mean=0.5, std=0.1)
+            ],
             num_rounds=time_horizon,
-            seed=42 + trial,
         )
 
         # Agent and baseline for this trial (different seeds for reproducibility)
@@ -128,28 +129,11 @@ if __name__ == "__main__":
         # (num_items, time_horizon)
         baseline_played_arms[trial] = baseline_results.played_arms
 
-    # Plot cumulative regret averaged across trials
-    plot_cumulative_regret(
-        valuations=valuations,
-        agents_played_arms=agents_played_arms,
-        baseline_played_arms=baseline_played_arms,
-        prices=prices,
-        agents_names=["Random Agent"],
-        save_plot=True,
-    )
     # Plot price frequency histograms averaged across trials
-    plot_price_frequency_histograms(
+    plot_budget_evolution(
         valuations=valuations,
         agents_played_arms=agents_played_arms,
         prices=prices,
-        agents_names=["Random Agent"],
-        save_plot=True,
-    )
-    # Plot price frequency histograms for baseline averaged across trials
-    plot_price_frequency_histograms(
-        valuations=valuations,
-        agents_played_arms=baseline_played_arms[np.newaxis, :, :, :],
-        prices=prices,
-        agents_names=["Baseline"],
-        save_plot=True,
+        agents_names=["UCBAgent"],
+        initial_budget=150,
     )
