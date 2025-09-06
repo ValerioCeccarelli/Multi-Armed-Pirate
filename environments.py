@@ -32,7 +32,7 @@ class Environment(ABC):
         pass
 
 
-class StocasticEnvironment(Environment):
+class StochasticEnvironment(Environment):
     def __init__(self, distribution_func: Callable, num_items: int, num_rounds: int, seed: int = 42):
         """
         Stochastic environment where valuations are drawn from a specified distribution.
@@ -82,8 +82,8 @@ class StocasticEnvironment(Environment):
 if __name__ == "__main__":
     print("Stochastic Environment Test...")
 
-    env = StocasticEnvironment(
-        distribution_func=StocasticEnvironment.gaussian_distribution(),
+    env = StochasticEnvironment(
+        distribution_func=StochasticEnvironment.gaussian_distribution(),
         num_items=5,
         num_rounds=100,
         seed=42
