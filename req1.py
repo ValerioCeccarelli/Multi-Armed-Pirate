@@ -7,9 +7,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from environments import Environment, StochasticEnvironment
-from agents import Agent, UCBAgent
+from agents import Agent, UCBAgent, CombinatorialUCBBidding
 from baselines import FixedActionBaselineAgent
-from plotting import plot_price_frequency_histograms
+from plotting import plot_price_frequency_histograms, plot_cumulative_regret, plot_budget_evolution
 
 
 @dataclass
@@ -135,6 +135,7 @@ def run_multiple_simulations(
         (num_trials, num_items, time_horizon), -1, dtype=np.int64)
 
     for trial in range(num_trials):
+        print(f"Running trial {trial + 1}/{num_trials}...")
         env = env_builder()
         agent = agent_builder(agent_config)
         baseline_agent = baseline_builder(baseline_config, env)
@@ -155,82 +156,10 @@ def run_multiple_simulations(
     )
 
 
-def plot_cumulative_regret(
-        valuations: NDArray[np.float64],
-        agents_played_arms: NDArray[np.int64],
-        baseline_played_arms: NDArray[np.int64],
-        prices: NDArray[np.float64],
-        agents_names: list[str],  # (num_agents,)
-        title: str = "Cumulative Regret Over Time",
-        ax: plt.Axes = None) -> None:
-    """
-    Plot cumulative regret over time.
+print("Task 1.1: Without budget constraint")
 
-    Args:
-        valuations: Valuations matrix (num_trials, num_items, time_horizon)
-        agents_played_arms: Played arms by agents (num_agents, num_trials, num_items, time_horizon)
-        baseline_played_arms: Played arms by baseline (num_trials, num_items, time_horizon)
-        prices: Prices matrix (num_prices,)
-        agents_names: Names of the agents (num_agents,)
-        title: Title of the plot
-        ax: Matplotlib Axes to plot on. If None, creates a new figure and axes and plots there.
-    """
-
-    num_agents, num_trials, num_items, time_horizon = agents_played_arms.shape
-    assert valuations.shape == (
-        num_trials, num_items, time_horizon), f"Expected valuations shape {(num_trials, num_items, time_horizon)}, got {valuations.shape}"
-    assert baseline_played_arms.shape == (
-        num_trials, num_items, time_horizon), f"Expected baseline_played_arms shape {(num_trials, num_items, time_horizon)}, got {baseline_played_arms.shape}"
-    assert len(
-        agents_names) == num_agents, f"Expected {num_agents} agent names, got {len(agents_names)}"
-
-    is_new_figure = ax is None
-    if is_new_figure:
-        fig, ax = plt.subplots(figsize=(10, 6))
-
-    for agent_idx in range(num_agents):
-        # (num_trials, num_items, time_horizon)
-        agent_played_prices = prices[agents_played_arms[agent_idx]]
-        # (num_trials, num_items, time_horizon)
-        baseline_played_prices = prices[baseline_played_arms]
-
-        # (num_trials, num_items, time_horizon)
-        agent_rewards = np.where(
-            valuations >= agent_played_prices, agent_played_prices, 0.0)
-        # (num_trials, num_items, time_horizon)
-        baseline_rewards = np.where(
-            valuations >= baseline_played_prices, baseline_played_prices, 0.0)
-
-        average_agent_rewards = np.mean(
-            np.sum(agent_rewards, axis=1), axis=0)  # (time_horizon,)
-        average_baseline_rewards = np.mean(
-            np.sum(baseline_rewards, axis=1), axis=0)  # (time_horizon,)
-
-        std_agent_rewards = np.std(
-            np.sum(agent_rewards, axis=1), axis=0)  # (time_horizon,)
-        std_baseline_rewards = np.std(
-            np.sum(baseline_rewards, axis=1), axis=0)  # (time_horizon,)
-
-        cumulative_regrets = np.cumsum(
-            average_baseline_rewards - average_agent_rewards)  # (time_horizon,)
-        cumulative_std = np.sqrt(
-            np.cumsum(std_agent_rewards**2 + std_baseline_rewards**2))  # (time_horizon,)
-
-        ax.plot(cumulative_regrets, label=agents_names[agent_idx])
-        ax.fill_between(np.arange(time_horizon), cumulative_regrets - cumulative_std, cumulative_regrets +
-                        cumulative_std, alpha=0.3, label=f"{agents_names[agent_idx]} confidence interval")
-
-    ax.set_title(title)
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Cumulative Regret")
-    ax.legend()
-
-    if is_new_figure:
-        plt.show()
-
-
-num_trials = 10
-time_horizon = 1000
+num_trials = 2
+time_horizon = 10000
 num_prices = 10
 prices = np.linspace(0.1, 1, num_prices, dtype=np.float64)
 
@@ -260,7 +189,7 @@ def agent_builder(config: UCBAgentConfig) -> Agent:
 
 @dataclass
 class BaselineAgentConfig:
-    pass
+    budget: int = None  # No budget constraint by default
 
 
 def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
@@ -270,19 +199,84 @@ def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
         num_items=env.num_items,
         price_set=prices,
         time_horizon=time_horizon,
-        valuations=env.valuations
+        valuations=env.valuations,
+        budget=config.budget
+    )
+
+
+# results = run_multiple_simulations(
+#     env_builder=env_builder,
+#     agent_builder=agent_builder,
+#     baseline_builder=baseline_builder,
+#     num_trials=num_trials,
+#     agent_config=UCBAgentConfig(num_prices=num_prices),
+#     baseline_config=BaselineAgentConfig(),
+#     prices=prices
+# )
+
+# plot_cumulative_regret(
+#     valuations=results.valuations,
+#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+#     baseline_played_arms=results.baseline_played_arms,
+#     prices=prices,
+#     agents_names=["UCB Agent"],
+#     title="Cumulative Regret of UCB Agent vs Random Baseline"
+# )
+
+# plot_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+#     prices=prices,
+#     agents_names=["UCB Agent"],
+# )
+
+# plot_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
+#     prices=prices,
+#     agents_names=["Baseline Agent"],
+# )
+
+
+print("Task 1.2: With budget constraint")
+
+# Same env builder as before
+
+time_horizon = 10000
+budget = 3000
+
+
+@dataclass
+class CombinatorialUCBAgentConfig:
+    num_prices: int
+    budget: int
+    alpha: float = 1.0
+
+
+def combinatorial_agent_builder(config: CombinatorialUCBAgentConfig) -> Agent:
+    assert isinstance(
+        config, CombinatorialUCBAgentConfig), f"Expected CombinatorialUCBAgentConfig, got {type(config)}"
+    return CombinatorialUCBBidding(
+        num_items=1,  # Currently only supports single item
+        price_set=prices,
+        budget=config.budget,
+        time_horizon=time_horizon,
+        alpha=config.alpha
     )
 
 
 results = run_multiple_simulations(
     env_builder=env_builder,
-    agent_builder=agent_builder,
+    agent_builder=combinatorial_agent_builder,
     baseline_builder=baseline_builder,
     num_trials=num_trials,
-    agent_config=UCBAgentConfig(num_prices=num_prices),
-    baseline_config=BaselineAgentConfig(),
+    agent_config=CombinatorialUCBAgentConfig(
+        num_prices=num_prices, budget=budget),
+    baseline_config=BaselineAgentConfig(budget=budget),
     prices=prices
 )
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
 plot_cumulative_regret(
     valuations=results.valuations,
@@ -290,7 +284,17 @@ plot_cumulative_regret(
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
     agents_names=["UCB Agent"],
-    title="Cumulative Regret of UCB Agent vs Random Baseline"
+    title="Cumulative Regret of UCB Agent vs Random Baseline",
+    ax=axes[0]
+)
+
+plot_budget_evolution(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    prices=prices,
+    initial_budget=budget,
+    agents_names=["UCB Agent"],
+    ax=axes[1]
 )
 
 plot_price_frequency_histograms(
@@ -299,3 +303,12 @@ plot_price_frequency_histograms(
     prices=prices,
     agents_names=["UCB Agent"],
 )
+
+plot_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
+    prices=prices,
+    agents_names=["Baseline Agent"],
+)
+
+plt.show()

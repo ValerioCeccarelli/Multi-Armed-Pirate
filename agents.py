@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 from numpy.typing import NDArray
 import numpy as np
 import math
+from scipy.optimize import LinearConstraint, milp
 
 
 class Agent(ABC):
@@ -113,17 +115,17 @@ class PrimalDualAgent(Agent):
         self.budget = budget
         self.horizon = horizon
         self.eta = eta if eta is not None else 1 / math.sqrt(horizon)
-        
+
         # EXP3.P as the primal agent
         self.exp3p = Exp3PAgent(K=num_prices, T=horizon, delta=0.05)
-        
+
         # Budget and pacing
         self.remaining_budget = budget
         self.rho = budget / horizon  # pacing rate
-        
+
         # Dual variable
         self.lmbd = 1.0
-        
+
         # Tracking
         self.total_counts = 0
         self._last_price_index = -1
@@ -133,7 +135,7 @@ class PrimalDualAgent(Agent):
             # Budget depleted
             self._last_price_index = -1
             return np.array([-1], dtype=np.int64)
-        
+
         price_index = self.exp3p.pull_arm()
         self._last_price_index = price_index
         return np.array([price_index], dtype=np.int64)
@@ -142,45 +144,47 @@ class PrimalDualAgent(Agent):
         if self._last_price_index == -1:
             # No arm was pulled (budget depleted)
             return
-        
+
         reward = rewards[0]
-        
+
         # Determine if a sale occurred (cost = 1 if sale, 0 otherwise)
         # We assume reward > 0 means a sale occurred
         cost = 1.0 if reward > 0 else 0.0
-        
+
         # Update budget
         self.remaining_budget -= cost
         self.total_counts += 1
-        
+
         # Compute normalized reward for EXP3.P
         # The Lagrangian is: reward - lambda * (cost - rho)
         net_reward = reward - self.lmbd * (cost - self.rho)
-        
+
         # Normalize to [0,1] for EXP3.P
         # Assuming price range is [0, 1], max possible reward is 1
         max_possible = 1.0 - self.lmbd * (0 - self.rho)  # when cost=0
-        min_possible = 0.0 - self.lmbd * (1 - self.rho)  # when cost=1, reward=0
-        
+        min_possible = 0.0 - self.lmbd * \
+            (1 - self.rho)  # when cost=1, reward=0
+
         if max_possible > min_possible:
-            normalized_reward = (net_reward - min_possible) / (max_possible - min_possible)
+            normalized_reward = (net_reward - min_possible) / \
+                (max_possible - min_possible)
         else:
             normalized_reward = 0.5  # fallback
-        
+
         # Clamp to [0,1]
         normalized_reward = np.clip(normalized_reward, 0.0, 1.0)
-        
+
         # Update EXP3.P
         self.exp3p.probs = self.exp3p._compute_probs()
         self.exp3p.update(self._last_price_index, normalized_reward)
-        
+
         # Update dual variable lambda
         self.lmbd = np.clip(
             self.lmbd - self.eta * (self.rho - cost),
-            a_min=0.0, 
+            a_min=0.0,
             a_max=1.0 / self.rho if self.rho > 0 else 1.0
         )
-        
+
         self._last_price_index = -1  # Reset for next round
 
 
@@ -193,26 +197,27 @@ class MultiProductPrimalDualAgent(Agent):
     def __init__(self, num_items: int, num_prices: int, budget: float, horizon: int, eta: float = None):
         assert num_items > 0, "MultiProduct agent requires at least 1 item."
         assert num_prices > 1, "MultiProduct agent requires at least 2 prices per item."
-        
+
         self.num_items = num_items
         self.num_prices = num_prices
         self.budget = budget
         self.horizon = horizon
-        self.eta = eta if eta is not None else 1 / math.sqrt(num_items * horizon)
-        
+        self.eta = eta if eta is not None else 1 / \
+            math.sqrt(num_items * horizon)
+
         # EXP3.P agents - one for each product
         self.exp3p_agents = [
             Exp3PAgent(K=num_prices, T=horizon, delta=0.05)
             for _ in range(num_items)
         ]
-        
+
         # Budget and pacing
         self.remaining_budget = budget
         self.rho = budget / (num_items * horizon)  # pacing rate per item
-        
+
         # Dual variable (shared across all products)
         self.lmbd = 1.0
-        
+
         # Tracking
         self.total_counts = 0
         self._last_price_indices = [-1] * num_items
@@ -222,13 +227,13 @@ class MultiProductPrimalDualAgent(Agent):
             # Budget depleted
             self._last_price_indices = [-1] * self.num_items
             return np.array([-1] * self.num_items, dtype=np.int64)
-        
+
         # Each EXP3.P agent selects a price for its product
         price_indices = []
         for i in range(self.num_items):
             price_index = self.exp3p_agents[i].pull_arm()
             price_indices.append(price_index)
-        
+
         self._last_price_indices = price_indices
         return np.array(price_indices, dtype=np.int64)
 
@@ -236,54 +241,321 @@ class MultiProductPrimalDualAgent(Agent):
         if any(idx == -1 for idx in self._last_price_indices):
             # No arms were pulled (budget depleted)
             return
-        
+
         total_revenue = 0.0
         total_sales = 0
-        
+
         # Process each product
         for j in range(self.num_items):
             price_index = self._last_price_indices[j]
             reward = rewards[j]
-            
+
             # Determine if a sale occurred
             cost = 1.0 if reward > 0 else 0.0
-            
+
             total_revenue += reward
             total_sales += cost
-            
+
             # Compute normalized reward for EXP3.P
             # The Lagrangian is: reward - lambda * (cost - rho)
             net_reward = reward - self.lmbd * (cost - self.rho)
-            
+
             # Normalize to [0,1] for EXP3.P
             # Assuming max price is 1.0
             max_possible = 1.0 - self.lmbd * (0 - self.rho)  # when cost=0
-            min_possible = 0.0 - self.lmbd * (1 - self.rho)  # when cost=1, reward=0
-            
+            min_possible = 0.0 - self.lmbd * \
+                (1 - self.rho)  # when cost=1, reward=0
+
             if max_possible > min_possible:
-                normalized_reward = (net_reward - min_possible) / (max_possible - min_possible)
+                normalized_reward = (net_reward - min_possible) / \
+                    (max_possible - min_possible)
             else:
                 normalized_reward = 0.5  # fallback
-            
+
             # Clamp to [0,1]
             normalized_reward = np.clip(normalized_reward, 0.0, 1.0)
-            
+
             # Update the corresponding EXP3.P agent
             agent = self.exp3p_agents[j]
             agent.probs = agent._compute_probs()
             agent.update(price_index, normalized_reward)
-        
+
         # Update budget
         self.remaining_budget -= total_sales
         self.total_counts += 1
-        
+
         # Update dual variable lambda (shared across all products)
         # The constraint is: expected total consumption <= rho * num_items
         self.lmbd = np.clip(
             self.lmbd - self.eta * (self.rho * self.num_items - total_sales),
-            a_min=0.0, 
+            a_min=0.0,
             a_max=1.0 / self.rho if self.rho > 0 else 1.0
         )
-        
+
         # Reset for next round
         self._last_price_indices = [-1] * self.num_items
+
+
+class CombinatorialUCBBidding:
+    """
+    Agent for combinatorial bidding using Upper Confidence Bound (UCB).
+
+    This agent manages price selection for multiple item types under budget constraints,
+    using a combinatorial optimization approach.
+    """
+
+    def __init__(
+        self,
+        num_items: int,
+        price_set: list[float],
+        budget: int,
+        time_horizon: int,
+        alpha: float = 1.0,
+    ):
+        """
+        Initialize the combinatorial UCB agent.
+
+        Args:
+            num_items: Number of item types
+            price_set: Discrete set of possible prices for all items
+            budget: Total initial budget
+            time_horizon: Time horizon of the simulation
+            alpha: UCB/LCB exploration parameter (alpha)
+        """
+        self.num_items = int(num_items)
+        self.price_set = list(price_set)
+        self.num_prices = len(self.price_set)
+        self.initial_budget = int(budget)
+        self.time_horizon = time_horizon
+        self.exploration_param = alpha
+
+        # Statistics stored in num_items x num_prices matrices
+        self.pull_counts = np.zeros((self.num_items, self.num_prices))
+        self.average_rewards = np.zeros((self.num_items, self.num_prices))
+        self.average_costs = np.zeros((self.num_items, self.num_prices))
+
+        self.remaining_budget = budget
+        self.current_round = 0
+        self.last_chosen_price_indices = np.zeros(self.num_items, dtype=int)
+
+        self.schedule = np.ones(
+            (self.num_items, self.time_horizon), dtype=int) * -1
+        self.taken = np.zeros((self.num_items, self.time_horizon), dtype=int)
+
+    def pull_arm(self) -> np.ndarray:
+        """
+        Select a price index for each of the item types.
+
+        Returns:
+            Numpy array of selected price indices.
+        """
+        if self.remaining_budget < self.num_items:
+            # Budget depleted
+            self.last_chosen_price_indices = -1 * np.ones(
+                self.num_items, dtype=int)
+            return self.last_chosen_price_indices
+
+        # Exploration phase: ensure each arm is tried at least once
+        unexplored_arm = self._find_unexplored_arm()
+        if unexplored_arm is not None:
+            self.last_chosen_price_indices = unexplored_arm
+            return unexplored_arm
+
+        # Calculate UCB and LCB for optimization
+        upper_confidence_bounds, lower_confidence_bounds = (
+            self._calculate_confidence_bounds()
+        )
+
+        # Solve the combinatorial optimization problem
+        chosen_indices = self._solve_optimization_problem(
+            upper_confidence_bounds, lower_confidence_bounds
+        )
+
+        self.last_chosen_price_indices = chosen_indices
+        return chosen_indices
+
+    def _find_unexplored_arm(self) -> Optional[np.ndarray]:
+        """
+        Find the first unexplored arm.
+
+        Returns:
+            Array of price indices if unexplored arm found, None otherwise.
+        """
+        for item_idx in range(self.num_items):
+            for price_idx in range(self.num_prices):
+                if self.pull_counts[item_idx, price_idx] == 0:
+                    # Explore arm (item_idx, price_idx)
+                    chosen_indices = np.zeros(self.num_items, dtype=int)
+                    chosen_indices[item_idx] = price_idx
+                    return chosen_indices
+        return None
+
+    def _calculate_confidence_bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Calculate Upper Confidence Bounds (UCB) and Lower Confidence Bounds (LCB).
+
+        Returns:
+            Tuple of (UCB for rewards, LCB for costs)
+        """
+        # Add small epsilon to avoid division by zero
+        confidence_term = self.exploration_param * np.sqrt(
+            np.log(self.time_horizon) / (self.pull_counts + 1e-8)
+        )
+
+        reward_ucb = self.average_rewards + confidence_term
+        cost_lcb = np.maximum(0, self.average_costs - confidence_term)
+
+        return reward_ucb, cost_lcb
+
+    def _solve_optimization_problem(
+        self, reward_ucb: np.ndarray, cost_lcb: np.ndarray
+    ) -> np.ndarray:
+        """
+        Solve the Integer Linear Programming (ILP) optimization problem.
+
+        Args:
+            reward_ucb: Upper confidence bounds for rewards
+            cost_lcb: Lower confidence bounds for costs
+
+        Returns:
+            Array of optimal selected price indices
+        """
+        # Calculate target spending rate for the remainder of the horizon
+        remaining_rounds = self.time_horizon - self.current_round
+        target_spend_rate = (
+            self.remaining_budget / remaining_rounds if remaining_rounds > 0 else 0
+        )
+
+        # Set up optimization problem
+        objective_coefficients = -reward_ucb.flatten()  # Minimize negative = maximize
+
+        # Constraints
+        constraints = self._build_constraints(cost_lcb, target_spend_rate)
+
+        # Binary variables
+        integrality = np.ones_like(objective_coefficients)
+        bounds = (0, 1)
+
+        # Solve the ILP
+        result = milp(
+            c=objective_coefficients,
+            integrality=integrality,
+            bounds=bounds,
+            constraints=constraints,
+        )
+
+        if result.success and result.x is not None:
+            # Extract solution
+            solution_matrix = np.round(result.x).reshape(
+                (self.num_items, self.num_prices)
+            )
+            chosen_indices = np.argmax(solution_matrix, axis=1)
+        else:
+            # Fallback strategy: greedy selection
+            chosen_indices = self._greedy_fallback(
+                reward_ucb, cost_lcb, target_spend_rate
+            )
+
+        return chosen_indices
+
+    def _build_constraints(
+        self, cost_lcb: np.ndarray, target_spend_rate: float
+    ) -> list[LinearConstraint]:
+        """
+        Build constraints for the optimization problem.
+
+        Args:
+            cost_lcb: Lower confidence bounds for costs
+            target_spend_rate: Target spending rate
+
+        Returns:
+            List of linear constraints
+        """
+        constraints = []
+
+        # Constraint 1: Budget - total expected cost must not exceed spending rate
+        if cost_lcb.size > 0:
+            budget_constraint_matrix = np.array([cost_lcb.flatten()])
+            budget_upper_bound = np.array([target_spend_rate])
+            budget_lower_bound = -1e20 * np.ones_like(budget_upper_bound)
+            constraints.append(
+                LinearConstraint(
+                    budget_constraint_matrix, budget_lower_bound, budget_upper_bound
+                )
+            )
+
+        # Constraint 2: Choice - exactly one price must be chosen for each item
+        choice_constraint_matrix = []
+        for item_idx in range(self.num_items):
+            row = np.zeros(self.num_items * self.num_prices)
+            start_idx = item_idx * self.num_prices
+            end_idx = (item_idx + 1) * self.num_prices
+            row[start_idx:end_idx] = 1
+            choice_constraint_matrix.append(row)
+
+        if choice_constraint_matrix:
+            choice_matrix = np.array(choice_constraint_matrix)
+            choice_bounds = np.ones(self.num_items)
+            constraints.append(
+                LinearConstraint(choice_matrix, choice_bounds, choice_bounds)
+            )
+
+        return constraints
+
+    def _greedy_fallback(
+        self, reward_ucb: np.ndarray, cost_lcb: np.ndarray, target_spend_rate: float
+    ) -> np.ndarray:
+        """
+        Greedy fallback strategy when optimizer fails.
+
+        Args:
+            reward_ucb: Upper confidence bounds for rewards
+            cost_lcb: Lower confidence bounds for costs
+            target_spend_rate: Target spending rate
+
+        Returns:
+            Array of selected price indices
+        """
+        feasible_mask = cost_lcb <= target_spend_rate
+        masked_rewards = np.where(feasible_mask, reward_ucb, -np.inf)
+        return np.argmax(masked_rewards, axis=1)
+
+    def update(
+        self, rewards: np.ndarray, full_rewards: NDArray[np.float64] = None
+    ) -> None:
+        """
+        Update agent statistics after a round.
+
+        Args:
+            rewards: Array of rewards received for each item
+        """
+        chosen_price_indices = self.last_chosen_price_indices
+        costs = (rewards > 0).astype(int)
+
+        self.schedule[:, self.current_round] = [
+            self.price_set[x] for x in chosen_price_indices
+        ]
+        self.taken[:, self.current_round] = costs
+
+        # Update statistics for each item
+        for item_idx in range(self.num_items):
+            price_idx = chosen_price_indices[item_idx]
+
+            # Increment pull count for arm (item_idx, price_idx)
+            self.pull_counts[item_idx, price_idx] += 1
+
+            # Update running averages using incremental formula: M_k = M_{k-1} + (x_k - M_{k-1}) / k
+            pull_count = self.pull_counts[item_idx, price_idx]
+
+            reward_diff = rewards[item_idx] - \
+                self.average_rewards[item_idx, price_idx]
+            self.average_rewards[item_idx,
+                                 price_idx] += reward_diff / pull_count
+
+            cost_diff = costs[item_idx] - \
+                self.average_costs[item_idx, price_idx]
+            self.average_costs[item_idx, price_idx] += cost_diff / pull_count
+
+        assert np.all(c in (0, 1) for c in costs)
+        self.remaining_budget -= np.sum(costs)
+        self.current_round += 1
