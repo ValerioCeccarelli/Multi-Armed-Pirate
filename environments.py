@@ -46,21 +46,28 @@ class StochasticEnvironment(Environment):
         self._num_items = num_items
         self._num_rounds = num_rounds
         self._rng = np.random.default_rng(seed)
-        self._valuations = self._rng.choice(
-            distribution_func(), size=(num_items, num_rounds))
+        self._valuations = np.array(
+            [[distribution_func() for _ in range(num_rounds)] for _ in range(num_items)])
 
     @classmethod
     def gaussian_distribution(cls, mean: float = 0.5, std: float = 0.1) -> Callable[[], float]:
         """Generate a Gaussian distribution function."""
         def distribution():
-            return np.random.normal(loc=mean, scale=std, size=1000)
+            return np.random.normal(loc=mean, scale=std)
         return distribution
 
     @classmethod
     def beta_distribution(cls, a: float = 2.0, b: float = 5.0) -> Callable[[], float]:
         """Generate a Beta distribution function."""
         def distribution():
-            return np.random.beta(a=a, b=b, size=1000)
+            return np.random.beta(a=a, b=b)
+        return distribution
+
+    @classmethod
+    def uniform_distribution(cls, low: float = 0.0, high: float = 1.0) -> Callable[[], float]:
+        """Generate a Uniform distribution function."""
+        def distribution():
+            return np.random.uniform(low=low, high=high)
         return distribution
 
     def round(self, round: int) -> NDArray[np.float64]:
