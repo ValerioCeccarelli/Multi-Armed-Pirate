@@ -8,14 +8,13 @@ def plot_cumulative_regret(
     agents_played_arms: NDArray[np.int64],
     baseline_played_arms: NDArray[np.int64],
     prices: NDArray[np.float64],
-    agents_names: list[str],  # (num_agents,)
+    agents_names: list[str],
     title: str = "Cumulative Regret Over Time",
     ax: plt.Axes = None,
     save_plot: bool = False,
     save_path: str = "cumulative_regret.png",
 ) -> None:
     """Plot cumulative regret over time.
-
 
     Args:
         valuations: Valuations matrix (num_trials, num_items, time_horizon)
@@ -107,16 +106,25 @@ def plot_cumulative_regret(
 
 
 def plot_price_frequency_histograms(
-    valuations: NDArray[np.float64],  # (num_trials, num_items, time_horizon)
-    agents_played_arms: NDArray[
-        np.int64
-    ],  # (num_agents, num_trials, num_items, time_horizon)
-    prices: NDArray[np.float64],  # (num_prices,)
-    agents_names: list[str],  # (num_agents,)
+    valuations: NDArray[np.float64],
+    agents_played_arms: NDArray[np.int64],
+    prices: NDArray[np.float64],
+    agents_names: list[str],
     save_plot: bool = False,
     save_path_prefix: str = "price_frequency",
 ) -> None:
-    """Plots price frequency histograms for each agent and item."""
+    """Plots price frequency histograms for each agent and item.
+
+    Args:
+        valuations: Valuations matrix (num_trials, num_items, time_horizon)
+        agents_played_arms: Played arms by agents (num_agents, num_trials,
+            num_items, time_horizon)
+        prices: Prices matrix (num_prices,)
+        agents_names: Names of the agents (num_agents,)
+        save_plot: Whether to save the plot to a file.
+        save_path_prefix: Prefix for the path to save the plots to. Plots will be
+            saved as f"{save_path_prefix}_{agent_name}.png".
+    """
     num_agents, num_trials, num_items, time_horizon = agents_played_arms.shape
     assert valuations.shape == (num_trials, num_items, time_horizon), (
         f"Expected valuations shape {(num_trials, num_items, time_horizon)}, got"
