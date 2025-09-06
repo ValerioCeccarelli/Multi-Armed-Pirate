@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from time import sleep
 
 from numpy.typing import NDArray
 import numpy as np
@@ -45,11 +44,12 @@ class Agent(ABC):
         pass
 
     @abstractmethod
-    def update(self, rewards: NDArray[np.float64]) -> None:
+    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
         """Update the agent's knowledge based on the results of the round.
 
         Args:
             rewards: Rewards received for each item. (num_items,)
+            full_rewards: Full rewards (valuations) for each item. (num_items, num_prices) Only used in some agents.
         """
         pass
 
