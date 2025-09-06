@@ -227,7 +227,7 @@ def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
     ), f"Expected BaselineAgentConfig, got {type(config)}"
     return FixedActionBaselineAgent(
         num_items=env.num_items,
-        price_set=prices,
+        prices=prices,
         time_horizon=time_horizon,
         valuations=env.valuations,
         budget=config.budget,
