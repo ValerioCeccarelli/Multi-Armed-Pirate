@@ -33,21 +33,22 @@ class Environment(ABC):
 
 
 class StochasticEnvironment(Environment):
-    def __init__(self, distribution_func: Callable, num_items: int, num_rounds: int, seed: int = 42):
+    def __init__(self, distribution_functions: list[Callable[[], float]], num_rounds: int, seed: int = 42):
         """
         Stochastic environment where valuations are drawn from a specified distribution.
 
         Args:
-            distribution_func (Callable): Function to generate random valuations.
-            num_items (int): Number of items.
+            distribution_functions (list[Callable[[], float]]): Functions to generate random valuations (num_items,)
             num_rounds (int): Total number of rounds.
             seed (int): Random seed for reproducibility.
         """
-        self._num_items = num_items
+        self._num_items = len(distribution_functions)
         self._num_rounds = num_rounds
         self._rng = np.random.default_rng(seed)
         self._valuations = np.array(
-            [[distribution_func() for _ in range(num_rounds)] for _ in range(num_items)])
+            [[distribution_func() for _ in range(num_rounds)]
+             for distribution_func in distribution_functions]
+        ).astype(np.float64)
 
     @classmethod
     def gaussian_distribution(cls, mean: float = 0.5, std: float = 0.1) -> Callable[[], float]:
@@ -90,15 +91,18 @@ if __name__ == "__main__":
     print("Stochastic Environment Test...")
 
     env = StochasticEnvironment(
-        distribution_func=StochasticEnvironment.gaussian_distribution(),
-        num_items=5,
+        distribution_functions=[
+            StochasticEnvironment.gaussian_distribution(),
+            StochasticEnvironment.gaussian_distribution(),
+            StochasticEnvironment.gaussian_distribution()
+        ],
         num_rounds=100,
         seed=42
     )
 
-    assert env.valuations.shape == (5, 100)
+    assert env.valuations.shape == (3, 100)
     assert env.time_horizon == 100
-    assert env.num_items == 5
+    assert env.num_items == 3
 
     # from collections import Counter
     # freq = Counter([float(x) for x in env.valuations[0]])
