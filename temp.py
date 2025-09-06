@@ -26,12 +26,6 @@ class Environment(ABC):
 
     @property
     @abstractmethod
-    def prices(self) -> NDArray[np.float64]:
-        """Array of available prices. (num_prices,)"""
-        pass
-
-    @property
-    @abstractmethod
     def num_items(self) -> int:
         """Number of items in the environment."""
         pass
@@ -67,10 +61,21 @@ class RunSimulationResult:
     played_arms: NDArray[np.int64]  # (num_items, time_horizon) (-1/int)
 
 
-def run_simulation(env: Environment, agent: Agent) -> RunSimulationResult:
+def run_simulation(env: Environment, agent: Agent, prices: NDArray[np.float64]) -> RunSimulationResult:
+    """
+    Run a simulation of the agent interacting with the environment.
+
+    Args:
+        env: The environment instance.
+        agent: The agent instance.
+        prices: Prices array (num_prices,)
+
+    Returns:
+        RunSimulationResult: The result of the simulation containing valuations and played arms.
+    """
+
     time_horizon = env.time_horizon
     num_items = env.num_items
-    prices = env.prices
 
     total_played_arms = np.full((num_items, time_horizon), -1, dtype=np.int64)
 
@@ -228,10 +233,6 @@ class RandomEnvironment(Environment):
         return self._valuations.shape[1]
 
     @property
-    def prices(self) -> NDArray[np.float64]:
-        return self._prices
-
-    @property
     def num_items(self) -> int:
         return self._valuations.shape[0]
 
@@ -266,8 +267,8 @@ if __name__ == "__main__":
         baseline_agent = RandomAgent(
             num_items=num_items, num_prices=num_prices, seed=24 + trial)
 
-        result = run_simulation(env, agent)
-        baseline_results = run_simulation(env, baseline_agent)
+        result = run_simulation(env, agent, prices)
+        baseline_results = run_simulation(env, baseline_agent, prices)
 
         valuations[trial] = result.valuations  # (num_items, time_horizon)
         # (num_items, time_horizon)
