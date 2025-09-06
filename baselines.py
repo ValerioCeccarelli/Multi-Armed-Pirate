@@ -25,16 +25,15 @@ class FixedActionBaselineAgent:
             valuations: Known valuations for each item at each round (num_items, time_horizon)
             budget: Total budget (if None, set to time_horizon)
         """
-        if budget is None:
-            budget = time_horizon
-
         self.num_items = int(num_items)
         assert self.num_items > 0, "num_items must be positive"
         self.price_set = list(price_set)
         assert len(self.price_set) > 0, "price_set must be non-empty"
         self.num_prices = len(self.price_set)
+        if budget is None:
+            budget = time_horizon * num_items
         self.initial_budget = int(budget)
-        assert self.initial_budget >= 0, "budget must be non-negative"
+        assert self.initial_budget >= self.num_items, "budget must be at least num_items"
         self.remaining_budget = int(budget)
         self.time_horizon = int(time_horizon)
 
@@ -64,13 +63,12 @@ class FixedActionBaselineAgent:
         self, valuations: np.ndarray, prices: list[float], budget: int
     ) -> list[float]:
         """
-        Calculate optimal baseline performance for the given environment.
-
-        The baseline represents the best possible fixed pricing strategy,
-        calculated with perfect knowledge of future valuations.
+        Calculate the optimal fixed price for each item using brute-force search.
 
         Args:
-            env: Simulation environment
+            valuations: Known valuations for each item at each round (num_items, time_horizon)
+            prices: List of possible prices for each item (num_prices,)
+            budget: Total budget
 
         Returns:
             list of optimal prices for each item
@@ -81,8 +79,7 @@ class FixedActionBaselineAgent:
         best_total_reward = -1
 
         # Generate all possible price combinations for items
-        all_price_combinations = list(
-            itertools.product(*([prices] * num_items)))
+        all_price_combinations = itertools.product(*([prices] * num_items))
 
         for price_combination in all_price_combinations:
             prices_array = np.array(price_combination)
@@ -107,12 +104,6 @@ class FixedActionBaselineAgent:
     ) -> float:
         """
         Evaluate a specific price combination.
-
-        Args:
-            env: Simulation environment
-            prices: Array of prices for each item
-            total_budget: Total available budget
-            num_items: Number of items
 
         Returns:
             float total reward
@@ -159,26 +150,45 @@ if __name__ == "__main__":
     price_set = np.array([0.1, 0.4, 0.7, 0.8])
     time_horizon = 5
 
-    from environments import StochasticEnvironment
-
-    env = StochasticEnvironment(
-        distribution_functions=[
-            StochasticEnvironment.gaussian_distribution(),
-            StochasticEnvironment.gaussian_distribution(),
-        ],
-        num_rounds=time_horizon,
-        seed=42
-    )
-
     # Create a FixedActionBaselineAgent instance
     agent = FixedActionBaselineAgent(
         num_items=num_items,
         price_set=price_set,
         time_horizon=time_horizon,
-        valuations=env.valuations
+        valuations=np.array(
+            [[0.1, 0.1, 0.1, 0.1, 0.1],
+             [0.5, 0.5, 0.5, 0.5, 0.5]])
     )
 
     assert tuple(agent.optimal_indexes) == (
-        1, 2), f"Expected optimal indexes (1, 2), got {agent.optimal_indexes}"
+        0, 1), f"Expected optimal indexes (1, 2), got {agent.optimal_indexes}"
+
+    agent = FixedActionBaselineAgent(
+        num_items=num_items,
+        price_set=price_set,
+        time_horizon=time_horizon,
+        valuations=np.array(
+            [[0.1, 0.1, 0.1, 0.1, 0.1],
+             [0.5, 0.5, 0.5, 0.5, 0.5]]),
+        budget=3
+    )
+
+    assert agent.optimal_indexes[
+        1] == 1, f"Expected optimal index for item 2 to be 1, got {agent.optimal_indexes[1]}"
+    assert agent.optimal_indexes[
+        0] >= 1, f"Expected optimal index for item 1 to be >= 1, got {agent.optimal_indexes[0]}"
+
+    agent = FixedActionBaselineAgent(
+        num_items=num_items,
+        price_set=price_set,
+        time_horizon=time_horizon,
+        valuations=np.array(
+            [[0.1, 0.1, 0.1, 0.9, 0.1],
+             [0.5, 0.5, 0.5, 0.5, 0.5]]),
+        budget=6
+    )
+
+    assert tuple(agent.optimal_indexes) == (
+        3, 1), f"Expected optimal indexes (3, 1), got {agent.optimal_indexes}"
 
     print("FixedActionBaselineAgent created successfully.")
