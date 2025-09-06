@@ -182,3 +182,108 @@ class PrimalDualAgent(Agent):
         )
         
         self._last_price_index = -1  # Reset for next round
+
+
+class MultiProductPrimalDualAgent(Agent):
+    """
+    Primal-Dual agent with Bandit Feedback for multi-product pricing.
+    Uses separate EXP3.P agents for each product and a shared dual variable lambda.
+    """
+
+    def __init__(self, num_items: int, num_prices: int, budget: float, horizon: int, eta: float = None):
+        assert num_items > 0, "MultiProduct agent requires at least 1 item."
+        assert num_prices > 1, "MultiProduct agent requires at least 2 prices per item."
+        
+        self.num_items = num_items
+        self.num_prices = num_prices
+        self.budget = budget
+        self.horizon = horizon
+        self.eta = eta if eta is not None else 1 / math.sqrt(num_items * horizon)
+        
+        # EXP3.P agents - one for each product
+        self.exp3p_agents = [
+            Exp3PAgent(K=num_prices, T=horizon, delta=0.05)
+            for _ in range(num_items)
+        ]
+        
+        # Budget and pacing
+        self.remaining_budget = budget
+        self.rho = budget / (num_items * horizon)  # pacing rate per item
+        
+        # Dual variable (shared across all products)
+        self.lmbd = 1.0
+        
+        # Tracking
+        self.total_counts = 0
+        self._last_price_indices = [-1] * num_items
+
+    def pull_arm(self) -> NDArray[np.int64]:
+        if self.remaining_budget < 1:
+            # Budget depleted
+            self._last_price_indices = [-1] * self.num_items
+            return np.array([-1] * self.num_items, dtype=np.int64)
+        
+        # Each EXP3.P agent selects a price for its product
+        price_indices = []
+        for i in range(self.num_items):
+            price_index = self.exp3p_agents[i].pull_arm()
+            price_indices.append(price_index)
+        
+        self._last_price_indices = price_indices
+        return np.array(price_indices, dtype=np.int64)
+
+    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
+        if any(idx == -1 for idx in self._last_price_indices):
+            # No arms were pulled (budget depleted)
+            return
+        
+        total_revenue = 0.0
+        total_sales = 0
+        
+        # Process each product
+        for j in range(self.num_items):
+            price_index = self._last_price_indices[j]
+            reward = rewards[j]
+            
+            # Determine if a sale occurred
+            cost = 1.0 if reward > 0 else 0.0
+            
+            total_revenue += reward
+            total_sales += cost
+            
+            # Compute normalized reward for EXP3.P
+            # The Lagrangian is: reward - lambda * (cost - rho)
+            net_reward = reward - self.lmbd * (cost - self.rho)
+            
+            # Normalize to [0,1] for EXP3.P
+            # Assuming max price is 1.0
+            max_possible = 1.0 - self.lmbd * (0 - self.rho)  # when cost=0
+            min_possible = 0.0 - self.lmbd * (1 - self.rho)  # when cost=1, reward=0
+            
+            if max_possible > min_possible:
+                normalized_reward = (net_reward - min_possible) / (max_possible - min_possible)
+            else:
+                normalized_reward = 0.5  # fallback
+            
+            # Clamp to [0,1]
+            normalized_reward = np.clip(normalized_reward, 0.0, 1.0)
+            
+            # Update the corresponding EXP3.P agent
+            agent = self.exp3p_agents[j]
+            agent.probs = agent._compute_probs()
+            agent.update(price_index, normalized_reward)
+        
+        # Update budget
+        self.remaining_budget -= total_sales
+        self.total_counts += 1
+        
+        # Update dual variable lambda (shared across all products)
+        # The constraint is: expected total consumption <= rho * num_items
+        self.lmbd = np.clip(
+            self.lmbd - self.eta * (self.rho * self.num_items - total_sales),
+            a_min=0.0, 
+            a_max=1.0 / self.rho if self.rho > 0 else 1.0
+        )
+        
+        # Reset for next round
+        self._last_price_indices = [-1] * self.num_items
