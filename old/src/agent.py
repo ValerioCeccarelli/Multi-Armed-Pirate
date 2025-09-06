@@ -1,18 +1,24 @@
 import itertools
-from scipy.optimize import milp, LinearConstraint
-import numpy as np
-from typing import Optional
-from collections import deque
+import math
 from abc import ABC, abstractmethod
+from collections import deque
+from typing import Optional
+
+import numpy as np
+from scipy.optimize import LinearConstraint, milp
+
 
 class BudgetDepletedException(RuntimeError):
     """Exception raised when the agent's budget is depleted."""
+
     pass
+
 
 class Agent(ABC):
     """
     Base class for all agents.
     """
+
     @abstractmethod
     def select_prices(self) -> list[float]:
         """
@@ -26,7 +32,7 @@ class Agent(ABC):
         Update the agent's knowledge based on the observed rewards and costs.
         """
         pass
-    
+
     @property
     @abstractmethod
     def price_set(self) -> list[float]:
@@ -54,8 +60,14 @@ class CombinatorialUCBBidding:
     using a combinatorial optimization approach.
     """
 
-    def __init__(self, num_items: int, price_set: list[float], budget: int,
-                 time_horizon: int, exploration_param: float = 1.0):
+    def __init__(
+        self,
+        num_items: int,
+        price_set: list[float],
+        budget: int,
+        time_horizon: int,
+        exploration_param: float = 1.0,
+    ):
         """
         Initialize the combinatorial UCB agent.
 
@@ -98,7 +110,9 @@ class CombinatorialUCBBidding:
             return unexplored_arm
 
         # Calculate UCB and LCB for optimization
-        upper_confidence_bounds, lower_confidence_bounds = self._calculate_confidence_bounds()
+        upper_confidence_bounds, lower_confidence_bounds = (
+            self._calculate_confidence_bounds()
+        )
 
         # Solve the combinatorial optimization problem
         chosen_indices = self._solve_optimization_problem(
@@ -141,8 +155,9 @@ class CombinatorialUCBBidding:
 
         return reward_ucb, cost_lcb
 
-    def _solve_optimization_problem(self, reward_ucb: np.ndarray,
-                                    cost_lcb: np.ndarray) -> np.ndarray:
+    def _solve_optimization_problem(
+        self, reward_ucb: np.ndarray, cost_lcb: np.ndarray
+    ) -> np.ndarray:
         """
         Solve the Integer Linear Programming (ILP) optimization problem.
 
@@ -155,8 +170,9 @@ class CombinatorialUCBBidding:
         """
         # Calculate target spending rate for the remainder of the horizon
         remaining_rounds = self.time_horizon - self.current_round
-        target_spend_rate = (self.remaining_budget / remaining_rounds
-                             if remaining_rounds > 0 else 0)
+        target_spend_rate = (
+            self.remaining_budget / remaining_rounds if remaining_rounds > 0 else 0
+        )
 
         # Set up optimization problem
         objective_coefficients = -reward_ucb.flatten()  # Minimize negative = maximize
@@ -179,17 +195,20 @@ class CombinatorialUCBBidding:
         if result.success and result.x is not None:
             # Extract solution
             solution_matrix = np.round(result.x).reshape(
-                (self.num_items, self.num_prices))
+                (self.num_items, self.num_prices)
+            )
             chosen_indices = np.argmax(solution_matrix, axis=1)
         else:
             # Fallback strategy: greedy selection
             chosen_indices = self._greedy_fallback(
-                reward_ucb, cost_lcb, target_spend_rate)
+                reward_ucb, cost_lcb, target_spend_rate
+            )
 
         return chosen_indices
 
-    def _build_constraints(self, cost_lcb: np.ndarray,
-                           target_spend_rate: float) -> list[LinearConstraint]:
+    def _build_constraints(
+        self, cost_lcb: np.ndarray, target_spend_rate: float
+    ) -> list[LinearConstraint]:
         """
         Build constraints for the optimization problem.
 
@@ -207,9 +226,11 @@ class CombinatorialUCBBidding:
             budget_constraint_matrix = np.array([cost_lcb.flatten()])
             budget_upper_bound = np.array([target_spend_rate])
             budget_lower_bound = -1e20 * np.ones_like(budget_upper_bound)
-            constraints.append(LinearConstraint(
-                budget_constraint_matrix, budget_lower_bound, budget_upper_bound
-            ))
+            constraints.append(
+                LinearConstraint(
+                    budget_constraint_matrix, budget_lower_bound, budget_upper_bound
+                )
+            )
 
         # Constraint 2: Choice - exactly one price must be chosen for each item
         choice_constraint_matrix = []
@@ -223,13 +244,15 @@ class CombinatorialUCBBidding:
         if choice_constraint_matrix:
             choice_matrix = np.array(choice_constraint_matrix)
             choice_bounds = np.ones(self.num_items)
-            constraints.append(LinearConstraint(
-                choice_matrix, choice_bounds, choice_bounds))
+            constraints.append(
+                LinearConstraint(choice_matrix, choice_bounds, choice_bounds)
+            )
 
         return constraints
 
-    def _greedy_fallback(self, reward_ucb: np.ndarray, cost_lcb: np.ndarray,
-                         target_spend_rate: float) -> np.ndarray:
+    def _greedy_fallback(
+        self, reward_ucb: np.ndarray, cost_lcb: np.ndarray, target_spend_rate: float
+    ) -> np.ndarray:
         """
         Greedy fallback strategy when optimizer fails.
 
@@ -245,8 +268,9 @@ class CombinatorialUCBBidding:
         masked_rewards = np.where(feasible_mask, reward_ucb, -np.inf)
         return np.argmax(masked_rewards, axis=1)
 
-    def update_statistics(self, chosen_price_indices: np.ndarray,
-                          rewards: np.ndarray, costs: np.ndarray) -> None:
+    def update_statistics(
+        self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray
+    ) -> None:
         """
         Update agent statistics after a round.
 
@@ -255,7 +279,9 @@ class CombinatorialUCBBidding:
             rewards: Array of rewards received for each item
             costs: Array of costs incurred for each item
         """
-        self.schedule[:, self.current_round] = [self.price_set[x] for x in chosen_price_indices]
+        self.schedule[:, self.current_round] = [
+            self.price_set[x] for x in chosen_price_indices
+        ]
         self.taken[:, self.current_round] = costs
 
         # Update statistics for each item
@@ -268,13 +294,10 @@ class CombinatorialUCBBidding:
             # Update running averages using incremental formula: M_k = M_{k-1} + (x_k - M_{k-1}) / k
             pull_count = self.pull_counts[item_idx, price_idx]
 
-            reward_diff = rewards[item_idx] - \
-                self.average_rewards[item_idx, price_idx]
-            self.average_rewards[item_idx,
-                                 price_idx] += reward_diff / pull_count
+            reward_diff = rewards[item_idx] - self.average_rewards[item_idx, price_idx]
+            self.average_rewards[item_idx, price_idx] += reward_diff / pull_count
 
-            cost_diff = costs[item_idx] - \
-                self.average_costs[item_idx, price_idx]
+            cost_diff = costs[item_idx] - self.average_costs[item_idx, price_idx]
             self.average_costs[item_idx, price_idx] += cost_diff / pull_count
 
         assert np.all(c in (0, 1) for c in costs)
@@ -286,8 +309,9 @@ class CombinatorialUCBBidding:
         """Alias for select_prices for compatibility."""
         return self.select_prices()
 
-    def update(self, chosen_price_indices: np.ndarray, rewards: np.ndarray,
-               costs: np.ndarray) -> None:
+    def update(
+        self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray
+    ) -> None:
         """Alias for update_statistics for compatibility."""
         return self.update_statistics(chosen_price_indices, rewards, costs)
 
@@ -300,7 +324,9 @@ class PrimalDualAgent:
     with the existing core (select_prices/update_statistics/current_round).
     """
 
-    def __init__(self, num_items, price_set, B, T, beta: float = 0.1, eta: float | None = None):
+    def __init__(
+        self, num_items, price_set, B, T, beta: float = 0.1, eta: float | None = None
+    ):
         """
         Args:
             num_items: number of product types (N)
@@ -324,17 +350,19 @@ class PrimalDualAgent:
         self.rho = (B / T) if T > 0 else 0.0  # target average cost per round
         self.lambda_t = 0.0
         # Dual learning rate
-        self.eta_dual = (beta / np.sqrt(max(T, 1))
-                         ) if eta is None else float(eta)
+        self.eta_dual = (beta / np.sqrt(max(T, 1))) if eta is None else float(eta)
 
         # EXP3 parameters and state (per item)
         self.gamma = float(beta)  # exploration (mixing) parameter
         # learning rate for EXP3; standard safe choice
-        self.eta_exp3 = min(1.0, np.sqrt(
-            np.log(max(self.K_prices, 2)) / (self.K_prices * max(self.T, 1))))
+        self.eta_exp3 = min(
+            1.0,
+            np.sqrt(np.log(max(self.K_prices, 2)) / (self.K_prices * max(self.T, 1))),
+        )
         self.weights = np.ones((self.N, self.K_prices), dtype=float)
         self.last_probs = np.full(
-            (self.N, self.K_prices), 1.0 / max(self.K_prices, 1), dtype=float)
+            (self.N, self.K_prices), 1.0 / max(self.K_prices, 1), dtype=float
+        )
         # Stores the indices chosen in the last call to pull_superarm
         self.last_chosen_indices = np.zeros(self.N, dtype=int)
 
@@ -358,8 +386,7 @@ class PrimalDualAgent:
         w_sum = self.weights.sum(axis=1, keepdims=True)
         # Avoid division by zero
         w_sum[w_sum == 0] = 1.0
-        p = (1.0 - self.gamma) * (self.weights / w_sum) + \
-            self.gamma / self.K_prices
+        p = (1.0 - self.gamma) * (self.weights / w_sum) + self.gamma / self.K_prices
         # numerical safety
         p = np.clip(p, 1e-12, 1.0)
         # renormalize rows
@@ -376,13 +403,16 @@ class PrimalDualAgent:
 
         probs = self._distributions()
         self.last_probs = probs
-        indices = np.array([
-            self._rng.choice(self.K_prices, p=probs[i]) for i in range(self.N)
-        ], dtype=int)
+        indices = np.array(
+            [self._rng.choice(self.K_prices, p=probs[i]) for i in range(self.N)],
+            dtype=int,
+        )
         self.last_chosen_indices = indices
         return indices
 
-    def update(self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray):
+    def update(
+        self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray
+    ):
         """
         Update EXP3 weights using Lagrangian gains and update the dual variable.
 
@@ -409,15 +439,13 @@ class PrimalDualAgent:
             # Guard index
             if k < 0 or k >= self.K_prices:
                 continue
-            p_ik = float(self.last_probs[i, k]
-                         ) if self.last_probs.size else 0.0
+            p_ik = float(self.last_probs[i, k]) if self.last_probs.size else 0.0
             if p_ik <= 0:
                 continue
             # Importance-weighted unbiased estimate of gain
             ghat = gains[i] / p_ik
             # EXP3 multiplicative update
-            self.weights[i, k] *= np.exp(self.eta_exp3 *
-                                         ghat / max(self.K_prices, 1))
+            self.weights[i, k] *= np.exp(self.eta_exp3 * ghat / max(self.K_prices, 1))
 
         # Budget accounting
         consumed = float(costs.sum())
@@ -426,16 +454,16 @@ class PrimalDualAgent:
         # Dual update with projection to [0, 1/rho]
         upper = (1.0 / self.rho) if self.rho > 0 else 1e6
         self.lambda_t = float(
-            np.clip(self.lambda_t - self.eta_dual *
-                    (self.rho - consumed), 0.0, upper)
+            np.clip(self.lambda_t - self.eta_dual * (self.rho - consumed), 0.0, upper)
         )
 
         self.t += 1
         # Keep compatibility attribute in sync
         self.current_round = self.t
 
-    def update_statistics(self, chosen_price_indices: np.ndarray,
-                          rewards: np.ndarray, costs: np.ndarray) -> None:
+    def update_statistics(
+        self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray
+    ) -> None:
         """Alias for update for compatibility with core."""
         self.update(chosen_price_indices, rewards, costs)
 
@@ -448,8 +476,15 @@ class SlidingWindowUCBBidding:
     forgetting older observations. Statistics are computed only on the sliding window.
     """
 
-    def __init__(self, num_items: int, price_set: list[float], budget: int,
-                 time_horizon: int, window_size: int, exploration_param: float = 1.0):
+    def __init__(
+        self,
+        num_items: int,
+        price_set: list[float],
+        budget: int,
+        time_horizon: int,
+        window_size: int,
+        exploration_param: float = 1.0,
+    ):
         """
         Initialize the sliding window UCB agent.
 
@@ -470,8 +505,10 @@ class SlidingWindowUCBBidding:
         self.exploration_param = exploration_param
 
         # Sliding window storage: each cell contains a deque of (reward, cost) tuples
-        self.sliding_windows = [[deque(maxlen=window_size) for _ in range(self.num_prices)]
-                                for _ in range(self.num_items)]
+        self.sliding_windows = [
+            [deque(maxlen=window_size) for _ in range(self.num_prices)]
+            for _ in range(self.num_items)
+        ]
 
         # Cache for statistics to avoid recomputing every time
         self.average_rewards = np.zeros((self.num_items, self.num_prices))
@@ -495,7 +532,9 @@ class SlidingWindowUCBBidding:
             return unexplored_arm
 
         # Calculate UCB and LCB for optimization
-        upper_confidence_bounds, lower_confidence_bounds = self._calculate_confidence_bounds()
+        upper_confidence_bounds, lower_confidence_bounds = (
+            self._calculate_confidence_bounds()
+        )
 
         # Solve the combinatorial optimization problem
         chosen_indices = self._solve_optimization_problem(
@@ -554,8 +593,7 @@ class SlidingWindowUCBBidding:
 
                 if window_size > 0:
                     rewards, costs = zip(*window)
-                    self.average_rewards[item_idx,
-                                         price_idx] = np.mean(rewards)
+                    self.average_rewards[item_idx, price_idx] = np.mean(rewards)
                     self.average_costs[item_idx, price_idx] = np.mean(costs)
                     self.pull_counts[item_idx, price_idx] = window_size
                 else:
@@ -563,8 +601,9 @@ class SlidingWindowUCBBidding:
                     self.average_costs[item_idx, price_idx] = 0.0
                     self.pull_counts[item_idx, price_idx] = 0
 
-    def _solve_optimization_problem(self, reward_ucb: np.ndarray,
-                                    cost_lcb: np.ndarray) -> np.ndarray:
+    def _solve_optimization_problem(
+        self, reward_ucb: np.ndarray, cost_lcb: np.ndarray
+    ) -> np.ndarray:
         """
         Solve the Integer Linear Programming (ILP) optimization problem.
 
@@ -577,8 +616,9 @@ class SlidingWindowUCBBidding:
         """
         # Calculate target spending rate for the remainder of the horizon
         remaining_rounds = self.time_horizon - self.current_round
-        target_spend_rate = (self.remaining_budget / remaining_rounds
-                             if remaining_rounds > 0 else 0)
+        target_spend_rate = (
+            self.remaining_budget / remaining_rounds if remaining_rounds > 0 else 0
+        )
 
         # Set up optimization problem
         objective_coefficients = -reward_ucb.flatten()  # Minimize negative = maximize
@@ -601,17 +641,20 @@ class SlidingWindowUCBBidding:
         if result.success and result.x is not None:
             # Extract solution
             solution_matrix = np.round(result.x).reshape(
-                (self.num_items, self.num_prices))
+                (self.num_items, self.num_prices)
+            )
             chosen_indices = np.argmax(solution_matrix, axis=1)
         else:
             # Fallback strategy: greedy selection
             chosen_indices = self._greedy_fallback(
-                reward_ucb, cost_lcb, target_spend_rate)
+                reward_ucb, cost_lcb, target_spend_rate
+            )
 
         return chosen_indices
 
-    def _build_constraints(self, cost_lcb: np.ndarray,
-                           target_spend_rate: float) -> list[LinearConstraint]:
+    def _build_constraints(
+        self, cost_lcb: np.ndarray, target_spend_rate: float
+    ) -> list[LinearConstraint]:
         """
         Build constraints for the optimization problem.
 
@@ -629,9 +672,11 @@ class SlidingWindowUCBBidding:
             budget_constraint_matrix = np.array([cost_lcb.flatten()])
             budget_upper_bound = np.array([target_spend_rate])
             budget_lower_bound = -1e20 * np.ones_like(budget_upper_bound)
-            constraints.append(LinearConstraint(
-                budget_constraint_matrix, budget_lower_bound, budget_upper_bound
-            ))
+            constraints.append(
+                LinearConstraint(
+                    budget_constraint_matrix, budget_lower_bound, budget_upper_bound
+                )
+            )
 
         # Constraint 2: Choice - exactly one price must be chosen for each item
         choice_constraint_matrix = []
@@ -645,13 +690,15 @@ class SlidingWindowUCBBidding:
         if choice_constraint_matrix:
             choice_matrix = np.array(choice_constraint_matrix)
             choice_bounds = np.ones(self.num_items)
-            constraints.append(LinearConstraint(
-                choice_matrix, choice_bounds, choice_bounds))
+            constraints.append(
+                LinearConstraint(choice_matrix, choice_bounds, choice_bounds)
+            )
 
         return constraints
 
-    def _greedy_fallback(self, reward_ucb: np.ndarray, cost_lcb: np.ndarray,
-                         target_spend_rate: float) -> np.ndarray:
+    def _greedy_fallback(
+        self, reward_ucb: np.ndarray, cost_lcb: np.ndarray, target_spend_rate: float
+    ) -> np.ndarray:
         """
         Greedy fallback strategy when optimizer fails.
 
@@ -667,8 +714,9 @@ class SlidingWindowUCBBidding:
         masked_rewards = np.where(feasible_mask, reward_ucb, -np.inf)
         return np.argmax(masked_rewards, axis=1)
 
-    def update_statistics(self, chosen_price_indices: np.ndarray,
-                          rewards: np.ndarray, costs: np.ndarray) -> None:
+    def update_statistics(
+        self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray
+    ) -> None:
         """
         Update agent statistics after a round using sliding window approach.
 
@@ -697,15 +745,22 @@ class SlidingWindowUCBBidding:
         """Alias for select_prices for compatibility."""
         return self.select_prices()
 
-    def update(self, chosen_price_indices: np.ndarray, rewards: np.ndarray,
-               costs: np.ndarray) -> None:
+    def update(
+        self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray
+    ) -> None:
         """Alias for update_statistics for compatibility."""
         return self.update_statistics(chosen_price_indices, rewards, costs)
 
 
 class FixedActionBaselineAgent:
-    def __init__(self, num_items: int, price_set: list[float], budget: int,
-                 time_horizon: int, valuations: np.ndarray):
+    def __init__(
+        self,
+        num_items: int,
+        price_set: list[float],
+        budget: int,
+        time_horizon: int,
+        valuations: np.ndarray,
+    ):
         """
         Args:
             num_items: number of item types (N)
@@ -725,27 +780,36 @@ class FixedActionBaselineAgent:
         self.last_chosen_price_indices = np.zeros(self.num_items, dtype=int)
 
         valuations = np.asarray(valuations, dtype=float)
-        assert valuations.shape == (self.num_items, self.time_horizon), "valuations must be shape (num_items, time_horizon)"
+        assert valuations.shape == (
+            self.num_items,
+            self.time_horizon,
+        ), "valuations must be shape (num_items, time_horizon)"
         self._valuations = valuations
 
         optimal_prices = self.calculate_baseline_performance(
-            self._valuations, self.price_set, self.initial_budget)
+            self._valuations, self.price_set, self.initial_budget
+        )
 
-        self.optimal_indexes = np.array([
-            self.price_set.index(p) if p in self.price_set else 0 for p in optimal_prices
-        ], dtype=int)
-                
+        self.optimal_indexes = np.array(
+            [
+                self.price_set.index(p) if p in self.price_set else 0
+                for p in optimal_prices
+            ],
+            dtype=int,
+        )
 
-    def calculate_baseline_performance(self, valuations: np.ndarray, prices: list[float], budget: int) -> list[float]:
+    def calculate_baseline_performance(
+        self, valuations: np.ndarray, prices: list[float], budget: int
+    ) -> list[float]:
         """
         Calculate optimal baseline performance for the given environment.
-        
+
         The baseline represents the best possible fixed pricing strategy,
         calculated with perfect knowledge of future valuations.
-        
+
         Args:
             env: Simulation environment
-            
+
         Returns:
             list of optimal prices for each item
         """
@@ -755,11 +819,11 @@ class FixedActionBaselineAgent:
         best_total_reward = -1
 
         # Generate all possible price combinations for items
-        all_price_combinations = list(itertools.product(*([prices]*num_items)))
+        all_price_combinations = list(itertools.product(*([prices] * num_items)))
 
         for price_combination in all_price_combinations:
             prices_array = np.array(price_combination)
-            
+
             # Calculate performance for this price combination
             total_reward = self._evaluate_price_combination(
                 valuations, prices_array, budget, num_items
@@ -770,37 +834,42 @@ class FixedActionBaselineAgent:
                 best_prices = price_combination
 
         return best_prices
-    
-    def _evaluate_price_combination(self, valuations: np.ndarray, prices: np.ndarray, 
-                               total_budget: int, num_items: int) -> float:
+
+    def _evaluate_price_combination(
+        self,
+        valuations: np.ndarray,
+        prices: np.ndarray,
+        total_budget: int,
+        num_items: int,
+    ) -> float:
         """
         Evaluate a specific price combination.
-        
+
         Args:
             env: Simulation environment
             prices: Array of prices for each item
             total_budget: Total available budget
             num_items: Number of items
-            
+
         Returns:
             float total reward
         """
         # Mask where valuations are >= prices (purchases)
         purchase_mask = valuations >= prices[:, np.newaxis]
-        
+
         # Rewards matrix (price * purchase)
         rewards_matrix = purchase_mask * prices[:, np.newaxis]
-        
+
         # Cumulative cost over time (number of purchases)
         cumulative_purchases = np.cumsum(purchase_mask.sum(axis=0))
-        
+
         # Apply budget constraint
         budget_constraint = cumulative_purchases <= (total_budget - num_items)
-        
+
         # Calculate total rewards for each round
         rewards_per_round = rewards_matrix.sum(axis=0) * budget_constraint
         total_reward = rewards_per_round.sum()
-        
+
         return total_reward
 
     def select_prices(self) -> np.ndarray:
@@ -808,20 +877,22 @@ class FixedActionBaselineAgent:
         t = self.current_round
         if t < 0 or t >= self.time_horizon:
             raise IndexError("current_round out of bounds")
-        
+
         indices = self.optimal_indexes
         self.last_chosen_price_indices = indices
         return indices
-    
+
     @property
     def schedule(self) -> np.ndarray:
         """Return the fixed optimal price index schedule. (item, round)"""
         return np.tile(self.optimal_indexes[:, np.newaxis], (1, self.time_horizon))
 
     # Compatibility alias
-    def update(self, chosen_price_indices: np.ndarray, rewards: np.ndarray,
-               costs: np.ndarray) -> None:
+    def update(
+        self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray
+    ) -> None:
         self.current_round += 1
+
 
 class IntervalAwareBaselineAgent:
     """
@@ -838,8 +909,14 @@ class IntervalAwareBaselineAgent:
     update/update_statistics, current_round, remaining_budget, last_chosen_price_indices.
     """
 
-    def __init__(self, num_items: int, price_set: list[float], budget: int,
-                 time_horizon: int, valuations: np.ndarray):
+    def __init__(
+        self,
+        num_items: int,
+        price_set: list[float],
+        budget: int,
+        time_horizon: int,
+        valuations: np.ndarray,
+    ):
         """
         Args:
             num_items: number of item types (N)
@@ -859,7 +936,10 @@ class IntervalAwareBaselineAgent:
         self.last_chosen_price_indices = np.zeros(self.num_items, dtype=int)
 
         valuations = np.asarray(valuations, dtype=float)
-        assert valuations.shape == (self.num_items, self.time_horizon), "valuations must be shape (num_items, time_horizon)"
+        assert valuations.shape == (
+            self.num_items,
+            self.time_horizon,
+        ), "valuations must be shape (num_items, time_horizon)"
         self._valuations = valuations
 
         # Precompute the schedule of price indices per (item, round)
@@ -879,9 +959,11 @@ class IntervalAwareBaselineAgent:
     def _build_schedule(self) -> np.ndarray:
         # Build list of (valuation, item, round)
         n_items, n_rounds = self._valuations.shape
-        triples = [(float(self._valuations[i, t]), i, t)
-                   for i in range(n_items)
-                   for t in range(n_rounds)]
+        triples = [
+            (float(self._valuations[i, t]), i, t)
+            for i in range(n_items)
+            for t in range(n_rounds)
+        ]
         # Sort descending by valuation
         triples.sort(key=lambda x: x[0], reverse=True)
 
@@ -909,16 +991,174 @@ class IntervalAwareBaselineAgent:
         t = self.current_round
         if t < 0 or t >= self.time_horizon:
             raise IndexError("current_round out of bounds")
-        
+
         indices = self._schedule[:, t].astype(int)
         self.last_chosen_price_indices = indices
         return indices
 
     # Compatibility alias
-    def update(self, chosen_price_indices: np.ndarray, rewards: np.ndarray,
-               costs: np.ndarray) -> None:
+    def update(
+        self, chosen_price_indices: np.ndarray, rewards: np.ndarray, costs: np.ndarray
+    ) -> None:
         self.current_round += 1
         self._taken[:, self.current_round - 1] = costs
+
+
+class Exp3PAgent:
+    """
+    EXP3.P agent for adversarial bandits with high-probability regret bounds.
+
+    Applies the Exp3.P algorithm with the following hyperparameter settings:
+      - η = log(K/δ) / (T * K)
+      - γ = 0.95 * log(K) / (T * K)
+      - β = K * log(K) / T
+
+    Theorem:
+      The Exp3.P algorithm applied to an adversarial MAB problem with K arms and the above
+      parameters suffers a regret of:
+          R_T ≤ 5.15 * T * K * log(K/δ)
+      with probability at least 1 − δ.
+
+    On each round t:
+      1. Compute sampling distribution p_t:
+           p_{i,t} = (1-γ)*exp(η * G_i) / Σ_j exp(η * G_j) + γ/K
+      2. Draw I_t ∼ p_t and observe reward g ∈ [0,1]
+      3. Form importance-weighted reward plus bias:
+           x̂ = (g + β) / p_{I_t,t}
+           Define B as the vector with B_i = β / p_{i,t} for all arms.
+      4. Update cumulative pseudo-rewards:
+           G_{I_t} ← G_{I_t} + x̂
+           For each i ≠ I_t, update G_i ← G_i + B_i
+
+    References:
+      - https://trovo.faculty.polimi.it/02source/olam_2022/2022_05_11_Lez_4_MAB.pdf
+    """
+
+    def __init__(self, K: int, T: int, delta: float = 0.1):
+        self.K = K
+        self.T = T
+        self.delta = delta
+        self.eta = math.log(K / delta) / (T * K)
+        self.gamma = 0.95 * math.log(K) / (T * K)
+        self.beta = K * math.log(K) / T
+        self.G = np.zeros(K)
+        self.probs = np.ones(K) / K
+
+    def _compute_probs(self) -> np.ndarray:
+        expG = np.exp(self.eta * self.G)
+        base = (1 - self.gamma) * (expG / expG.sum())
+        probs = base + self.gamma / self.K
+        return probs / probs.sum()
+
+    def pull_arm(self) -> int:
+        self.probs = self._compute_probs()
+        choice = int(np.random.choice(self.K, p=self.probs))
+        return choice
+
+    def update(self, chosen: int, reward: float) -> None:
+        for i in range(self.K):
+            if i != chosen:
+                self.G[i] += self.beta / self.probs[i]
+            else:
+                self.G[i] += (reward + self.beta) / self.probs[i]
+
+
+class MyBanditFeedbackPrimalDual:
+    """
+    Primal-Dual agent with Bandit Feedback for non-stationary pricing using EXP3.P.
+    This agent is compatible with req3.py and expects num_items=1.
+    """
+
+    def __init__(self, num_items, price_set, B, T, beta=0.1, eta=None):
+        if num_items != 1:
+            raise ValueError("MyBanditFeedbackPrimalDual only supports num_items=1")
+        self.N = 1
+        self.P = list(price_set)
+        self.prices = np.array(self.P)
+        self.K_prices = len(self.P)
+        self.T = int(T)
+        self.B_initial = int(B)
+        self.remaining_budget = int(B)
+
+        self.eta = 1 / np.sqrt(T) if eta is None else eta  # eta from giulio.py
+        self.rng = np.random.default_rng()
+        self.exp3p = Exp3PAgent(K=self.K_prices, T=self.T, delta=0.05)
+        self.rho = float(B / T) if T > 0 else 0.0
+        self.lmbd = 1.0
+        self.t = 0
+        self.pull_counts = np.zeros(self.K_prices, int)
+        self.last_arm: Optional[int] = None
+
+        self.lmbd_history = []
+
+        # for compatibility
+        self.current_round = 0
+        self.schedule = np.ones((self.N, self.T), dtype=int) * -1
+        self.taken = np.zeros((self.N, self.T), dtype=int)
+
+    @property
+    def price_set(self) -> list[float]:
+        """Return the price set."""
+        return self.P
+
+    def select_prices(self) -> np.ndarray:
+        if self.remaining_budget < 1:
+            self.last_arm = None
+            raise BudgetDepletedException("No remaining budget to select prices.")
+        self.last_arm = self.exp3p.pull_arm()
+        return np.array([self.last_arm], dtype=int)
+
+    def update(self, prices_t: list[float], rewards: np.ndarray, costs: np.ndarray):
+        if self.last_arm is None:
+            return
+
+        assert rewards.shape == (1,)
+        assert costs.shape == (1,)
+
+        reward = rewards[0]
+        cost = costs[0]
+
+        self.schedule[0, self.t] = self.last_arm
+        self.taken[0, self.t] = cost
+
+        c_t = cost
+        f_t = reward
+
+        self.remaining_budget -= c_t
+        self.pull_counts[self.last_arm] += 1
+
+        net = f_t - self.lmbd * (c_t - self.rho)
+
+        # Normalize
+        p_max = self.prices.max()
+        L_up = p_max - self.lmbd * (0 - self.rho)
+        L_low = 0.0 - self.lmbd * (1 - self.rho)
+        norm_factor = L_up - L_low + 1e-12
+        net_norm = (net - L_low) / norm_factor
+
+        # Update the EXP3.P sub-agent using the bandit reward feedback for the chosen arm
+        self.exp3p.probs = self.exp3p._compute_probs()
+        self.exp3p.update(self.last_arm, net_norm)
+
+        # Update the dual variable lambda
+        if self.rho > 0:
+            self.lmbd = np.clip(
+                self.lmbd - self.eta * (self.rho - c_t), a_min=0.0, a_max=1.0 / self.rho
+            )
+        else:
+            self.lmbd = np.clip(
+                self.lmbd - self.eta * (self.rho - c_t), a_min=0.0, a_max=1e6
+            )
+        self.lmbd_history.append(self.lmbd)
+
+        self.t += 1
+        self.current_round = self.t
+
+    def update_statistics(
+        self, prices_t: list[float], rewards: np.ndarray, costs: np.ndarray
+    ) -> None:
+        """Alias for update for compatibility with core."""
+        self.update(prices_t, rewards, costs)
 
 
 if __name__ == "__main__":
@@ -926,8 +1166,8 @@ if __name__ == "__main__":
 
     env = AbruptSlightlyNonstationaryEnvironment(
         mean=[[10, 50], [100, 10], [1, 1]],  # Valuation means for each item
-        std=[[2, 2], [2, 2], [2, 2]],      # Standard deviations for each item
-        time_horizon=30
+        std=[[2, 2], [2, 2], [2, 2]],  # Standard deviations for each item
+        time_horizon=30,
     )
 
     agent = IntervalAwareBaselineAgent(
@@ -935,7 +1175,7 @@ if __name__ == "__main__":
         price_set=list(range(1, 100, 5)),
         budget=32,
         time_horizon=30,
-        valuations=env.valuations
+        valuations=env.valuations,
     )
 
     print(agent._schedule)

@@ -28,10 +28,10 @@ def run_experiment_with_animation() -> None:
     )
 
     experiment_config = ExperimentConfig(
-        time_horizon=1000,
+        time_horizon=1200,
         budget=200,
         price_range=list(range(5, 31, 5)),  # Prices from 5 to 30
-        num_trials=1,
+        num_trials=4,
         exploration_param=0.3,
         environment=env_config
     )
