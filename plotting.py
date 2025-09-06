@@ -1,6 +1,8 @@
+from collections import Counter
 import numpy as np
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
+from matplotlib.animation import FuncAnimation
 
 
 def plot_cumulative_regret(
@@ -105,6 +107,67 @@ def plot_cumulative_regret(
         plt.show()
 
 
+def plot_animated_price_frequency_histograms(
+    valuations: NDArray[np.float64],
+    agents_played_arms: NDArray[np.int64],
+    prices: NDArray[np.float64],
+    agents_names: list[str],
+    save_path_prefix: str = "animated_price_frequency",
+) -> None:
+    """Creates animated price frequency histograms for each agent and item.
+
+    Args:
+        valuations: Valuations matrix (num_trials, num_items, time_horizon)
+        agents_played_arms: Played arms by agents (num_agents, num_trials, num_items, time_horizon)
+        prices: Prices matrix (num_prices,)
+        agents_names: Names of the agents (num_agents,)
+        save_path_prefix: Prefix for the path to save the plots to. Plots will be
+            saved as f"{save_path_prefix}_{agent_name}.gif".
+    """
+
+    num_agents, num_trials, num_items, time_horizon = agents_played_arms.shape
+    assert valuations.shape == (num_trials, num_items, time_horizon), (
+        f"Expected valuations shape {(num_trials, num_items, time_horizon)}, got"
+        f" {valuations.shape}"
+    )
+    assert (
+        len(agents_names) == num_agents
+    ), f"Expected {num_agents} agent names, got {len(agents_names)}"
+
+    for agent_idx in range(num_agents):
+        fig, axes = plt.subplots(
+            1, num_items, figsize=(6 * num_items, 5), squeeze=False
+        )
+        axes = axes.flatten()
+        fig.suptitle(
+            f"Animated Price Frequency Histograms for {agents_names[agent_idx]}",
+            fontsize=16,
+        )
+
+        def update(frame):
+            for item_idx in range(num_items):
+                agent_played_arms = agents_played_arms[agent_idx,
+                                                       0, item_idx, :]
+                freq = Counter(agent_played_arms[:frame*100 + 1])
+                axes[item_idx].cla()
+                axes[item_idx].set_title(f"Item {item_idx}")
+                axes[item_idx].set_xlabel("Price")
+                axes[item_idx].set_ylabel("Frequency")
+                axes[item_idx].set_xlim(prices[0], prices[-1])
+                axes[item_idx].bar(
+                    [prices[arm] for arm in freq.keys()],
+                    [freq[arm] for arm in freq.keys()],
+                    width=0.05,
+                    color='skyblue'
+                )
+            return axes
+
+        ani = FuncAnimation(fig, update, frames=time_horizon, interval=500,
+                            blit=False, repeat=True)
+
+        plt.show()
+
+
 def plot_price_frequency_histograms(
     valuations: NDArray[np.float64],
     agents_played_arms: NDArray[np.int64],
@@ -142,13 +205,15 @@ def plot_price_frequency_histograms(
             for trial_idx in range(num_trials):
                 for t in range(time_horizon):
                     curr_valuation = valuations[trial_idx, item_idx, t]
-                    played_arm = agents_played_arms[agent_idx, trial_idx, item_idx, t]
+                    played_arm = agents_played_arms[agent_idx,
+                                                    trial_idx, item_idx, t]
                     if played_arm == -1:
                         # Reached round where budget was exhausted, stop
                         break
                     if curr_valuation >= prices[played_arm]:
                         arm_idx_to_num_successful_pulls[played_arm] = (
-                            arm_idx_to_num_successful_pulls.get(played_arm, 0) + 1
+                            arm_idx_to_num_successful_pulls.get(
+                                played_arm, 0) + 1
                         )
                     else:
                         arm_idx_to_num_failed_pulls[played_arm] = (
@@ -168,10 +233,13 @@ def plot_price_frequency_histograms(
             all_arms = set(success_freq.keys()) | set(failure_freq.keys())
             if all_arms:
                 sorted_arms = sorted(list(all_arms))
-                successes = np.array([success_freq.get(arm, 0) for arm in sorted_arms])
-                failures = np.array([failure_freq.get(arm, 0) for arm in sorted_arms])
+                successes = np.array([success_freq.get(arm, 0)
+                                     for arm in sorted_arms])
+                failures = np.array([failure_freq.get(arm, 0)
+                                    for arm in sorted_arms])
                 bar_prices = [prices[arm] for arm in sorted_arms]
-                max_frequency = max(max_frequency, np.max(successes + failures))
+                max_frequency = max(
+                    max_frequency, np.max(successes + failures))
                 agent_data.append(
                     {
                         "arms": sorted_arms,
@@ -238,7 +306,7 @@ def plot_price_frequency_histograms(
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # adjust for suptitle
         if save_plot:
             plt.savefig(f"{save_path_prefix}_{agents_names[agent_idx]}.png")
-        plt.show()
+        # plt.show()
 
 
 def plot_budget_evolution(
@@ -292,7 +360,8 @@ def plot_budget_evolution(
                     valid_pulls & (played_prices <= valuations_t), 1, 0
                 )
                 depleted_budget += successful_purchases
-            remaining_budget[:, t + 1] = remaining_budget[:, t] - depleted_budget
+            remaining_budget[:, t + 1] = remaining_budget[:,
+                                                          t] - depleted_budget
 
         mean_remaining_budget = np.mean(remaining_budget, axis=0)
         std_remaining_budget = np.std(remaining_budget, axis=0)
@@ -319,4 +388,4 @@ def plot_budget_evolution(
     if is_new_figure:
         if save_plot:
             plt.savefig(f"{save_path_prefix}_budget_evolution.png")
-        plt.show()
+        # plt.show()
