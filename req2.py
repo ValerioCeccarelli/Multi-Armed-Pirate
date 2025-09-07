@@ -12,6 +12,7 @@ from plotting import (
     plot_cumulative_regret,
     plot_budget_evolution,
     plot_animated_price_frequency_histograms,
+    plot_conversion_rates,
 )
 
 
@@ -266,6 +267,15 @@ plot_budget_evolution(
     agents_names=["Combinatorial UCB"],
     initial_budget=budget,
     ax=axes[1],
+)
+
+# Conversion rates as a separate plot with dual subplots
+plot_conversion_rates(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    baseline_played_arms=results.baseline_played_arms,
+    prices=prices,
+    agents_names=["Combinatorial UCB"]
 )
 
 plot_price_frequency_histograms(

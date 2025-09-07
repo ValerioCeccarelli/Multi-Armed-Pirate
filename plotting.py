@@ -384,6 +384,170 @@ def plot_price_frequency_histograms(
         # plt.show()
 
 
+def plot_conversion_rates(
+    valuations: NDArray[np.float64],
+    agents_played_arms: NDArray[np.int64],
+    baseline_played_arms: NDArray[np.int64],
+    prices: NDArray[np.float64],
+    agents_names: list[str],
+    ax: plt.Axes = None,
+    save_plot: bool = False,
+    save_path: str = "conversion_rates.png",
+) -> None:
+    """Plot conversion rates (success percentage) for each price and agent/item in separate subplots.
+
+    Args:
+        valuations: Valuations matrix (num_trials, num_items, time_horizon)
+        agents_played_arms: Played arms by agents (num_agents, num_trials, num_items, time_horizon)
+        baseline_played_arms: Played arms by baseline (num_trials, num_items, time_horizon)
+        prices: Prices matrix (num_prices,)
+        agents_names: Names of the agents (num_agents,)
+        ax: Matplotlib Axes to plot on. If provided, will be ignored as we create subplots
+        save_plot: Whether to save the plot to a file
+        save_path: Path to save the plot to
+    """
+    num_agents, num_trials, num_items, time_horizon = agents_played_arms.shape
+    assert valuations.shape == (num_trials, num_items, time_horizon), (
+        f"Expected valuations shape {(num_trials, num_items, time_horizon)}, got"
+        f" {valuations.shape}"
+    )
+    assert baseline_played_arms.shape == (num_trials, num_items, time_horizon), (
+        f"Expected baseline_played_arms shape {(num_trials, num_items, time_horizon)}, got"
+        f" {baseline_played_arms.shape}"
+    )
+    assert (
+        len(agents_names) == num_agents
+    ), f"Expected {num_agents} agent names, got {len(agents_names)}"
+
+    # Always create new figure with 2 subplots (agents vs baseline)
+    fig, (ax_agents, ax_baseline) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Colors for different items
+    colors = plt.cm.Set1(np.linspace(0, 1, max(num_items, 3)))
+    
+    # === PLOT 1: BASELINE CONVERSION RATES ===
+    for item_idx in range(num_items):
+        price_success = {}
+        price_failure = {}
+        
+        for trial_idx in range(num_trials):
+            for t in range(time_horizon):
+                curr_valuation = valuations[trial_idx, item_idx, t]
+                played_arm = baseline_played_arms[trial_idx, item_idx, t]
+                
+                if played_arm == -1:
+                    break  # Budget exhausted
+                
+                price = prices[played_arm]
+                if curr_valuation >= price:
+                    price_success[price] = price_success.get(price, 0) + 1
+                else:
+                    price_failure[price] = price_failure.get(price, 0) + 1
+        
+        # Calculate conversion rates for baseline
+        baseline_prices = []
+        baseline_rates = []
+        all_prices = set(price_success.keys()) | set(price_failure.keys())
+        
+        for price in sorted(all_prices):
+            successes = price_success.get(price, 0)
+            failures = price_failure.get(price, 0)
+            total = successes + failures
+            
+            if total > 0:
+                conversion_rate = (successes / total) * 100
+                baseline_prices.append(price)
+                baseline_rates.append(conversion_rate)
+        
+        if baseline_prices:
+            line_style = '-' if item_idx == 0 else '--'
+            marker_style = 'o' if item_idx == 0 else 's'
+            label = f'Item {item_idx + 1}' if num_items > 1 else 'Baseline'
+            
+            ax_baseline.plot(baseline_prices, baseline_rates, marker=marker_style, 
+                           linestyle=line_style, linewidth=2, markersize=6,
+                           label=label, color=colors[item_idx], alpha=0.8)
+
+    # === PLOT 2: AGENTS CONVERSION RATES ===
+    for agent_idx in range(num_agents):
+        for item_idx in range(num_items):
+            price_success = {}
+            price_failure = {}
+            
+            # Collect success/failure data for this agent and item
+            for trial_idx in range(num_trials):
+                for t in range(time_horizon):
+                    curr_valuation = valuations[trial_idx, item_idx, t]
+                    played_arm = agents_played_arms[agent_idx, trial_idx, item_idx, t]
+                    
+                    if played_arm == -1:
+                        break  # Budget exhausted
+                    
+                    price = prices[played_arm]
+                    if curr_valuation >= price:
+                        price_success[price] = price_success.get(price, 0) + 1
+                    else:
+                        price_failure[price] = price_failure.get(price, 0) + 1
+            
+            # Calculate conversion rates
+            agent_prices = []
+            agent_rates = []
+            all_prices = set(price_success.keys()) | set(price_failure.keys())
+            
+            for price in sorted(all_prices):
+                successes = price_success.get(price, 0)
+                failures = price_failure.get(price, 0)
+                total = successes + failures
+                
+                if total > 0:
+                    conversion_rate = (successes / total) * 100
+                    agent_prices.append(price)
+                    agent_rates.append(conversion_rate)
+            
+            if agent_prices:
+                # Use different line styles for different items of the same agent
+                line_style = '-' if item_idx == 0 else '--'
+                marker_style = 'o' if item_idx == 0 else 's'
+                
+                label = f'{agents_names[agent_idx]}'
+                if num_items > 1:
+                    label += f' Item {item_idx + 1}'
+                
+                ax_agents.plot(agent_prices, agent_rates, marker=marker_style, 
+                             linestyle=line_style, linewidth=2, markersize=6, 
+                             label=label, color=colors[item_idx])
+
+    # Configure baseline plot
+    ax_baseline.set_xlabel("Price")
+    ax_baseline.set_ylabel("Conversion Rate (%)")
+    ax_baseline.set_title("Baseline Conversion Rates")
+    ax_baseline.grid(True, alpha=0.3)
+    ax_baseline.legend()
+    ax_baseline.set_ylim(0, 105)
+    if len(prices) > 0:
+        ax_baseline.set_xlim(prices[0] - 0.05, prices[-1] + 0.05)
+
+    # Configure agents plot
+    ax_agents.set_xlabel("Price")
+    ax_agents.set_ylabel("Conversion Rate (%)")
+    agents_title = f"Agent Conversion Rates"
+    if len(agents_names) == 1:
+        agents_title = f"{agents_names[0]} Conversion Rates"
+    ax_agents.set_title(agents_title)
+    ax_agents.grid(True, alpha=0.3)
+    ax_agents.legend()
+    ax_agents.set_ylim(0, 105)
+    if len(prices) > 0:
+        ax_agents.set_xlim(prices[0] - 0.05, prices[-1] + 0.05)
+
+    plt.tight_layout()
+    
+    if save_plot:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    plt.show()
+
+
 def plot_budget_evolution(
     valuations: NDArray[np.float64],
     agents_played_arms: NDArray[np.int64],

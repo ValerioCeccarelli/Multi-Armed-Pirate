@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from environments import Environment, StochasticEnvironment
 from agents import Agent, UCBAgent, CombinatorialUCBBidding
 from baselines import FixedActionBaselineAgent
-from plotting import plot_price_frequency_histograms, plot_cumulative_regret, plot_budget_evolution, plot_animated_price_frequency_histograms
+from plotting import plot_price_frequency_histograms, plot_cumulative_regret, plot_budget_evolution, plot_animated_price_frequency_histograms, plot_conversion_rates
 
 
 @dataclass
@@ -295,6 +295,15 @@ plot_budget_evolution(
     initial_budget=budget,
     agents_names=["UCB Agent"],
     ax=axes[1]
+)
+
+# Conversion rates as a separate plot with dual subplots
+plot_conversion_rates(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    baseline_played_arms=results.baseline_played_arms,
+    prices=prices,
+    agents_names=["UCB Agent"]
 )
 
 plot_price_frequency_histograms(

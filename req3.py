@@ -23,6 +23,7 @@ from environments import (
 from plotting import (
     plot_animated_price_frequency_histograms,
     plot_budget_evolution,
+    plot_conversion_rates,
     plot_cumulative_regret,
     plot_price_frequency_histograms,
 )
@@ -192,7 +193,7 @@ time_horizon = 20_000
 prices = np.linspace(0.1, 1.0, 10)
 num_prices = len(prices)
 num_items = 1
-budget = 6_000  # integer budget
+budget = 2_000  # integer budget
 
 
 def env_builder() -> Environment:
@@ -280,6 +281,15 @@ plot_budget_evolution(
     agents_names=["FFPrimalDualPricingAgent"],
     initial_budget=budget,
     ax=axes[1],
+)
+
+# Conversion rates as a separate plot with dual subplots
+plot_conversion_rates(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    baseline_played_arms=results.baseline_played_arms,
+    prices=prices,
+    agents_names=["FFPrimalDualPricingAgent"]
 )
 
 plot_price_frequency_histograms(
