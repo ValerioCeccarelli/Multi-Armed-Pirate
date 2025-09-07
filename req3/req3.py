@@ -9,14 +9,10 @@ from agents import (
     Agent,
     PrimalDualAgent,
 )
-from baselines import (
-    FixedActionBaselineAgent,
-    OptimalDistributionSingleItemBaselineAgent,
-)
+from baselines import FixedActionBaselineAgent
 from environments import (
     Environment,
     NonStochasticSmoothChangeEnvironment,
-    StochasticEnvironment,
 )
 from plotting import (
     plot_animated_price_frequency_histograms,
@@ -207,16 +203,16 @@ def env_builder() -> Environment:
 
 
 @dataclass
-class FullFeedbackPrimalDualConfig:
+class PrimalDualConfig:
     num_items: int
     num_prices: int
     budget: int
     alpha: float = 1.0
 
 
-def combinatorial_agent_builder(config: FullFeedbackPrimalDualConfig) -> Agent:
+def primal_dual_agent_builder(config: PrimalDualConfig) -> Agent:
     assert isinstance(
-        config, FullFeedbackPrimalDualConfig
+        config, PrimalDualConfig
     ), f"Expected PrimalDualAgentConfig, got {type(config)}"
     return PrimalDualAgent(
         prices=prices,
@@ -235,12 +231,6 @@ def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
     assert isinstance(
         config, BaselineAgentConfig
     ), f"Expected BaselineAgentConfig, got {type(config)}"
-    # return OptimalDistributionSingleItemBaselineAgent(
-    #     prices=prices,
-    #     valuations=env.valuations,
-    #     time_horizon=time_horizon,
-    #     budget=config.budget,
-    # )
     return FixedActionBaselineAgent(
         prices=prices,
         num_items=1,
@@ -252,10 +242,10 @@ def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
 
 results = run_multiple_simulations(
     env_builder=env_builder,
-    agent_builder=combinatorial_agent_builder,
+    agent_builder=primal_dual_agent_builder,
     baseline_builder=baseline_builder,
     num_trials=num_trials,
-    agent_config=FullFeedbackPrimalDualConfig(
+    agent_config=PrimalDualConfig(
         num_items=num_items, num_prices=num_prices, budget=budget, alpha=0.01
     ),
     baseline_config=BaselineAgentConfig(budget=budget),
