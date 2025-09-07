@@ -4,8 +4,8 @@ from numpy.typing import NDArray
 import numpy as np
 from matplotlib import pyplot as plt
 
-from environments import Environment, NonStochasticSmoothChangeEnvironment, StochasticEnvironment
-from agents import Agent, MultiProductFFPrimalDualPricingAgent, CombinatorialUCBBidding, CombinatorialUCBBiddingSlidingWindow
+from environments import Environment, NonStochasticSmoothChangeEnvironment
+from agents import Agent, MultiItemDualPricingAgent, CombinatorialUCBBidding, CombinatorialUCBBiddingSlidingWindow
 from baselines import OptimalDistributionMultiItemBaselineAgent
 from plotting import (
     plot_price_frequency_histograms,
@@ -14,9 +14,6 @@ from plotting import (
     plot_animated_price_frequency_histograms,
     plot_conversion_rates,
 )
-
-
-# ---- Core simulation helpers (from req1.py) ----
 
 
 @dataclass
@@ -223,7 +220,7 @@ def combinatorial_agent_builder(env: Environment) -> Agent:
 
 
 def primal_dual_agent_builder(env: Environment) -> Agent:
-    return MultiProductFFPrimalDualPricingAgent(
+    return MultiItemDualPricingAgent(
         prices=prices,
         B=budget,
         T=time_horizon,

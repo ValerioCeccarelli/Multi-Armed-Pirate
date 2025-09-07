@@ -7,8 +7,6 @@ from numpy.typing import NDArray
 
 from agents import (
     Agent,
-    BanditFeedbackPrimalDual,
-    FFPrimalDualPricingAgent,
     PrimalDualAgent,
 )
 from baselines import (
@@ -220,7 +218,7 @@ def combinatorial_agent_builder(config: FullFeedbackPrimalDualConfig) -> Agent:
     assert isinstance(
         config, FullFeedbackPrimalDualConfig
     ), f"Expected PrimalDualAgentConfig, got {type(config)}"
-    return FFPrimalDualPricingAgent(
+    return PrimalDualAgent(
         prices=prices,
         B=config.budget,
         T=time_horizon,

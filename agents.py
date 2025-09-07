@@ -366,8 +366,8 @@ class HedgeAgent:
 
 
 # Task 3
-class FFPrimalDualPricingAgent(Agent):
-    """Primal-Dual agent with Full-Feedback for non-stationary pricing"""
+class PrimalDualAgent(Agent):
+    """Primal-Dual agent with Full-Feedback for non-stationary environments"""
 
     # TODO: in the future maybe we need to add eta parameter to experiment
     def __init__(self, prices: np.ndarray, T: int, B: float) -> None:
@@ -434,7 +434,7 @@ class FFPrimalDualPricingAgent(Agent):
 
 
 # Task 4
-class MultiProductFFPrimalDualPricingAgent(Agent):
+class MultiItemDualPricingAgent(Agent):
     """Primal-Dual agent with Full-Feedback for multi-product pricing"""
 
     def __init__(self, prices: list[np.ndarray], T: int, B: float, n_products: int, eta: float) -> None:
