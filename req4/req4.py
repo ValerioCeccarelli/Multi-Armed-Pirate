@@ -4,10 +4,10 @@ from numpy.typing import NDArray
 import numpy as np
 from matplotlib import pyplot as plt
 
-from ..environments import Environment, NonStochasticSmoothChangeEnvironment, StochasticEnvironment
-from ..agents import Agent, MultiProductFFPrimalDualPricingAgent, CombinatorialUCBBidding
-from ..baselines import OptimalDistributionMultiItemBaselineAgent
-from ..plotting import (
+from environments import Environment, NonStochasticSmoothChangeEnvironment, StochasticEnvironment
+from agents import Agent, MultiProductFFPrimalDualPricingAgent, CombinatorialUCBBidding, CombinatorialUCBBiddingSlidingWindow
+from baselines import OptimalDistributionMultiItemBaselineAgent
+from plotting import (
     plot_price_frequency_histograms,
     plot_cumulative_regret,
     plot_budget_evolution,
@@ -232,6 +232,16 @@ def primal_dual_agent_builder(env: Environment) -> Agent:
     )
 
 
+def sliding_window_agent_builder(env: Environment) -> Agent:
+    return CombinatorialUCBBiddingSlidingWindow(
+        num_items=num_items,
+        price_set=prices,
+        budget=budget,
+        time_horizon=env.time_horizon,
+        window_size=150
+    )
+
+
 def baseline_builder(env: Environment) -> Agent:
     return OptimalDistributionMultiItemBaselineAgent(
         prices=prices,
@@ -245,7 +255,8 @@ results = run_multiple_simulations(
     env_builder=env_builder,
     agent_builders=[
         primal_dual_agent_builder,
-        combinatorial_agent_builder
+        combinatorial_agent_builder,
+        sliding_window_agent_builder,
     ],
     baseline_builder=baseline_builder,
     num_trials=num_trials,
@@ -279,7 +290,7 @@ fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
 plot_cumulative_regret(
     valuations=results.valuations,
-    agents_played_arms=results.agents_played_arms,
+    agents_played_arms=results.agents_played_arms[[0, 1], ...],
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
     agents_names=["Primal Dual", "Combinatorial UCB"],
@@ -289,7 +300,7 @@ plot_cumulative_regret(
 
 plot_budget_evolution(
     valuations=results.valuations,
-    agents_played_arms=results.agents_played_arms,
+    agents_played_arms=results.agents_played_arms[[0, 1], ...],
     prices=prices,
     agents_names=["Primal Dual", "Combinatorial UCB"],
     initial_budget=budget,
@@ -297,6 +308,30 @@ plot_budget_evolution(
 )
 
 fig.savefig("req4_primaldual_vs_combucb_cumregret_budgetevolution.png")
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+plot_cumulative_regret(
+    valuations=results.valuations,
+    # Pass only agent 0 and 2
+    agents_played_arms=results.agents_played_arms[[0, 2], ...],
+    baseline_played_arms=results.baseline_played_arms,
+    prices=prices,
+    agents_names=["Primal Dual", "UCB Sliding Window"],
+    title="Cumulative Regret: MultiProduct Primal Dual vs UCB Sliding Window",
+    ax=axes[0],
+)
+
+plot_budget_evolution(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[[0, 2], ...],
+    prices=prices,
+    agents_names=["Primal Dual", "UCB Sliding Window"],
+    initial_budget=budget,
+    ax=axes[1],
+)
+
+fig.savefig("req4_primaldual_vs_ucbsliding_cumregret_budgetevolution.png")
 
 # Conversion rates as a separate plot with dual subplots
 plot_conversion_rates(
@@ -313,7 +348,7 @@ plot_price_frequency_histograms(
     valuations=results.valuations,
     agents_played_arms=results.agents_played_arms,
     prices=prices,
-    agents_names=["Primal Dual", "Combinatorial UCB"],
+    agents_names=["Primal Dual", "Combinatorial UCB", "UCB Sliding Window"],
     save_plot=True,
     save_path_prefix="req4_primaldual_price_histograms"
 )
