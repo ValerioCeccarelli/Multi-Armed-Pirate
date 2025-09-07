@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 from numpy.typing import NDArray
 import numpy as np
 import math
+from collections import deque
 from scipy.optimize import LinearConstraint, milp
 
 
@@ -332,6 +333,307 @@ class CombinatorialUCBBidding:
         assert np.all(c in (0, 1) for c in costs)
         self.remaining_budget -= np.sum(costs)
         self.current_round += 1
+
+
+class CombinatorialUCBBiddingSlidingWindow(Agent):
+    """
+    Combinatorial UCB agent with sliding window for non-stationary environments.
+    
+    This version only considers the last 'window_size' observations for each arm
+    when calculating confidence bounds, allowing better adaptation to changing environments.
+    """
+
+    def __init__(
+        self,
+        num_items: int,
+        price_set: list[float],
+        budget: int,
+        time_horizon: int,
+        window_size: int,
+        alpha: float = 1.0,
+    ):
+        """
+        Initialize the sliding window combinatorial UCB agent.
+
+        Args:
+            num_items: Number of item types
+            price_set: Discrete set of possible prices for all items
+            budget: Total initial budget
+            time_horizon: Time horizon of the simulation
+            window_size: Size of the sliding window (number of recent observations to consider)
+            alpha: UCB/LCB exploration parameter
+        """
+        self.num_items = int(num_items)
+        self.price_set = list(price_set)
+        self.num_prices = len(self.price_set)
+        self.initial_budget = int(budget)
+        self.time_horizon = time_horizon
+        self.window_size = window_size
+        self.exploration_param = alpha
+
+        # Sliding window data storage: deques for each (item, price) pair
+        # Each deque contains tuples of (reward, cost) observations
+        self.sliding_windows = {}
+        for item_idx in range(self.num_items):
+            for price_idx in range(self.num_prices):
+                self.sliding_windows[(item_idx, price_idx)] = deque(maxlen=window_size)
+
+        self.remaining_budget = budget
+        self.current_round = 0
+        self.last_chosen_price_indices = np.zeros(self.num_items, dtype=int)
+
+    def pull_arm(self) -> np.ndarray:
+        """
+        Select a price index for each of the item types using sliding window statistics.
+
+        Returns:
+            Numpy array of selected price indices.
+        """
+        if self.remaining_budget < self.num_items:
+            # Budget depleted
+            self.last_chosen_price_indices = -1 * np.ones(self.num_items, dtype=int)
+            return self.last_chosen_price_indices
+
+        # Exploration phase: ensure each arm is tried at least once
+        unexplored_arm = self._find_unexplored_arm()
+        if unexplored_arm is not None:
+            self.last_chosen_price_indices = unexplored_arm
+            return unexplored_arm
+
+        # Calculate UCB and LCB using sliding window data
+        upper_confidence_bounds, lower_confidence_bounds = (
+            self._calculate_confidence_bounds_sliding_window()
+        )
+
+        # Solve the combinatorial optimization problem
+        chosen_indices = self._solve_optimization_problem(
+            upper_confidence_bounds, lower_confidence_bounds
+        )
+
+        self.last_chosen_price_indices = chosen_indices
+        return chosen_indices
+
+    def _find_unexplored_arm(self) -> Optional[np.ndarray]:
+        """
+        Find the first unexplored arm (within the sliding window).
+
+        Returns:
+            Array of price indices if unexplored arm found, None otherwise.
+        """
+        for item_idx in range(self.num_items):
+            for price_idx in range(self.num_prices):
+                if len(self.sliding_windows[(item_idx, price_idx)]) == 0:
+                    # Explore arm (item_idx, price_idx)
+                    chosen_indices = np.zeros(self.num_items, dtype=int)
+                    chosen_indices[item_idx] = price_idx
+                    return chosen_indices
+        return None
+
+    def _calculate_confidence_bounds_sliding_window(self) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Calculate UCB and LCB using only the sliding window observations.
+
+        Returns:
+            Tuple of (UCB for rewards, LCB for costs)
+        """
+        reward_ucb = np.zeros((self.num_items, self.num_prices))
+        cost_lcb = np.zeros((self.num_items, self.num_prices))
+
+        for item_idx in range(self.num_items):
+            for price_idx in range(self.num_prices):
+                window = self.sliding_windows[(item_idx, price_idx)]
+                n_observations = len(window)
+
+                if n_observations == 0:
+                    # No observations yet, use optimistic initialization
+                    reward_ucb[item_idx, price_idx] = 1.0  # Max possible reward
+                    cost_lcb[item_idx, price_idx] = 0.0   # Min possible cost
+                else:
+                    # Calculate means from sliding window
+                    rewards = [obs[0] for obs in window]
+                    costs = [obs[1] for obs in window]
+                    
+                    mean_reward = np.mean(rewards)
+                    mean_cost = np.mean(costs)
+
+                    # Confidence term based on window size
+                    confidence_term = self.exploration_param * np.sqrt(
+                        np.log(self.current_round + 1) / n_observations
+                    )
+
+                    reward_ucb[item_idx, price_idx] = mean_reward + confidence_term
+                    cost_lcb[item_idx, price_idx] = max(0, mean_cost - confidence_term)
+
+        return reward_ucb, cost_lcb
+
+    def _solve_optimization_problem(
+        self, reward_ucb: np.ndarray, cost_lcb: np.ndarray
+    ) -> np.ndarray:
+        """
+        Solve the Integer Linear Programming (ILP) optimization problem.
+
+        Args:
+            reward_ucb: Upper confidence bounds for rewards
+            cost_lcb: Lower confidence bounds for costs
+
+        Returns:
+            Array of optimal selected price indices
+        """
+        # Calculate target spending rate for the remainder of the horizon
+        remaining_rounds = self.time_horizon - self.current_round
+        target_spend_rate = (
+            self.remaining_budget / remaining_rounds if remaining_rounds > 0 else 0
+        )
+
+        # Set up optimization problem
+        objective_coefficients = -reward_ucb.flatten()  # Minimize negative = maximize
+
+        # Constraints
+        constraints = self._build_constraints(cost_lcb, target_spend_rate)
+
+        # Binary variables
+        integrality = np.ones_like(objective_coefficients)
+        bounds = (0, 1)
+
+        # Solve the ILP
+        result = milp(
+            c=objective_coefficients,
+            integrality=integrality,
+            bounds=bounds,
+            constraints=constraints,
+        )
+
+        if result.success and result.x is not None:
+            # Extract solution
+            solution_matrix = np.round(result.x).reshape(
+                (self.num_items, self.num_prices)
+            )
+            chosen_indices = np.argmax(solution_matrix, axis=1)
+        else:
+            # Fallback strategy: greedy selection
+            chosen_indices = self._greedy_fallback(
+                reward_ucb, cost_lcb, target_spend_rate
+            )
+
+        return chosen_indices
+
+    def _build_constraints(
+        self, cost_lcb: np.ndarray, target_spend_rate: float
+    ) -> list[LinearConstraint]:
+        """
+        Build constraints for the optimization problem.
+
+        Args:
+            cost_lcb: Lower confidence bounds for costs
+            target_spend_rate: Target spending rate
+
+        Returns:
+            List of linear constraints
+        """
+        constraints = []
+
+        # Constraint 1: Budget - total expected cost must not exceed spending rate
+        if cost_lcb.size > 0:
+            budget_constraint_matrix = np.array([cost_lcb.flatten()])
+            budget_upper_bound = np.array([target_spend_rate])
+            budget_lower_bound = -1e20 * np.ones_like(budget_upper_bound)
+            constraints.append(
+                LinearConstraint(
+                    budget_constraint_matrix, budget_lower_bound, budget_upper_bound
+                )
+            )
+
+        # Constraint 2: Choice - exactly one price must be chosen for each item
+        choice_constraint_matrix = []
+        for item_idx in range(self.num_items):
+            row = np.zeros(self.num_items * self.num_prices)
+            start_idx = item_idx * self.num_prices
+            end_idx = (item_idx + 1) * self.num_prices
+            row[start_idx:end_idx] = 1
+            choice_constraint_matrix.append(row)
+
+        if choice_constraint_matrix:
+            choice_matrix = np.array(choice_constraint_matrix)
+            choice_bounds = np.ones(self.num_items)
+            constraints.append(
+                LinearConstraint(choice_matrix, choice_bounds, choice_bounds)
+            )
+
+        return constraints
+
+    def _greedy_fallback(
+        self, reward_ucb: np.ndarray, cost_lcb: np.ndarray, target_spend_rate: float
+    ) -> np.ndarray:
+        """
+        Greedy fallback strategy when optimizer fails.
+
+        Args:
+            reward_ucb: Upper confidence bounds for rewards
+            cost_lcb: Lower confidence bounds for costs
+            target_spend_rate: Target spending rate
+
+        Returns:
+            Array of selected price indices
+        """
+        feasible_mask = cost_lcb <= target_spend_rate
+        masked_rewards = np.where(feasible_mask, reward_ucb, -np.inf)
+        return np.argmax(masked_rewards, axis=1)
+
+    def update(
+        self, rewards: np.ndarray, full_rewards: NDArray[np.float64] = None
+    ) -> None:
+        """
+        Update sliding window statistics after a round.
+
+        Args:
+            rewards: Array of rewards received for each item
+        """
+        chosen_price_indices = self.last_chosen_price_indices
+        costs = (rewards > 0).astype(int)
+
+        # Update sliding windows for each item
+        for item_idx in range(self.num_items):
+            price_idx = chosen_price_indices[item_idx]
+            
+            if price_idx >= 0:  # Only update if a valid price was chosen
+                # Add new observation to the sliding window
+                # The deque will automatically remove the oldest observation if full
+                observation = (rewards[item_idx], costs[item_idx])
+                self.sliding_windows[(item_idx, price_idx)].append(observation)
+
+        # Update budget and round counter
+        assert np.all(c in (0, 1) for c in costs)
+        self.remaining_budget -= np.sum(costs)
+        self.current_round += 1
+
+    def get_window_statistics(self) -> dict:
+        """
+        Get current statistics from all sliding windows (for debugging/analysis).
+        
+        Returns:
+            Dictionary with statistics for each (item, price) pair
+        """
+        stats = {}
+        for item_idx in range(self.num_items):
+            for price_idx in range(self.num_prices):
+                window = self.sliding_windows[(item_idx, price_idx)]
+                if len(window) > 0:
+                    rewards = [obs[0] for obs in window]
+                    costs = [obs[1] for obs in window]
+                    stats[(item_idx, price_idx)] = {
+                        'count': len(window),
+                        'mean_reward': np.mean(rewards),
+                        'mean_cost': np.mean(costs),
+                        'recent_observations': list(window)
+                    }
+                else:
+                    stats[(item_idx, price_idx)] = {
+                        'count': 0,
+                        'mean_reward': 0.0,
+                        'mean_cost': 0.0,
+                        'recent_observations': []
+                    }
+        return stats
 
 
 # Task 3
