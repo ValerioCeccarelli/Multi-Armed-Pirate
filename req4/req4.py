@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 
 from environments import Environment, NonStochasticSmoothChangeEnvironment
 from agents import Agent, MultiItemDualPricingAgent, CombinatorialUCBBidding, CombinatorialUCBBiddingSlidingWindow
-from baselines import OptimalDistributionMultiItemBaselineAgent
+from baselines import FixedActionBaselineAgent
 from plotting import (
     plot_price_frequency_histograms,
     plot_cumulative_regret,
@@ -181,23 +181,8 @@ primal_dual_eta = 1 / np.sqrt(time_horizon)
 
 
 def env_builder() -> Environment:
-    # return StochasticEnvironment(
-    #     distribution_functions=[
-    #         StochasticEnvironment.gaussian_distribution(mean=0.25, std=0.1),
-    #     ],
-    #     num_rounds=time_horizon,
-    # )
     return NonStochasticSmoothChangeEnvironment(
         distribution_functions=[
-            # NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-            #     time_horizon, 1),
-            # NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-            #     time_horizon, 1),
-            # NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-            #     time_horizon, 1),
-            # NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-            #     time_horizon, 1),
-
             NonStochasticSmoothChangeEnvironment.generate_simple_tv(
                 time_horizon, 1),
             NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
@@ -240,11 +225,12 @@ def sliding_window_agent_builder(env: Environment) -> Agent:
 
 
 def baseline_builder(env: Environment) -> Agent:
-    return OptimalDistributionMultiItemBaselineAgent(
+    return FixedActionBaselineAgent(
+        num_items=num_items,
         prices=prices,
-        valuations=env.valuations,
         time_horizon=time_horizon,
-        budget=budget,
+        valuations=env.valuations,
+        budget=budget
     )
 
 
@@ -291,7 +277,7 @@ plot_cumulative_regret(
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
     agents_names=["Primal Dual", "Combinatorial UCB"],
-    title="Cumulative Regret: MultiProduct Primal Dual vs Optimal Baseline",
+    title="Cumulative Regret: MultiProduct Primal Dual vs Combinatorial UCB",
     ax=axes[0],
 )
 
