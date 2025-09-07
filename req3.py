@@ -4,8 +4,8 @@ from numpy.typing import NDArray
 import numpy as np
 from matplotlib import pyplot as plt
 
-from environments import Environment, StochasticEnvironment
-from agents import Agent, PrimalDualAgent, BanditFeedbackPrimalDual, NonStochasticSmoothChangeEnvironment
+from environments import Environment, StochasticEnvironment, NonStochasticSmoothChangeEnvironment
+from agents import Agent, PrimalDualAgent, BanditFeedbackPrimalDual
 from baselines import FixedActionBaselineAgent, OptimalDistributionSingleItemBaselineAgent
 from plotting import (
     plot_price_frequency_histograms,
@@ -177,11 +177,11 @@ def run_multiple_simulations(
 print("Task: Multiple items (3) with budget constraint")
 
 num_trials = 2
-time_horizon = 10_000
-num_prices = 10
-prices = np.linspace(0.1, 1.0, num_prices, dtype=np.float64)
+time_horizon = 20_000
+prices = np.linspace(0.1, 1.0, 10)
+num_prices = len(prices)
 num_items = 1
-budget = 5000  # integer budget
+budget = 6_000  # integer budget
 
 
 def env_builder() -> Environment:
@@ -291,7 +291,6 @@ plot_animated_price_frequency_histograms(
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
     agents_names=["Primal Dual"],
-    save_path_prefix="req3_animation_primal_dual"
 )
 
 plt.show()
