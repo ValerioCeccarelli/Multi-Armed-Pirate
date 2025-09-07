@@ -144,6 +144,13 @@ class NonStochasticSmoothChangeEnvironment(Environment):
 
         return distribution
 
+    @classmethod
+    def gaussian_distribution(cls, mean: float = 0.5, std: float = 0.1) -> Callable[[int], float]:
+        """Generate a Gaussian distribution function that oscillates."""
+        def distribution(t: int) -> float:
+            return np.random.normal(loc=mean + 0.1 * np.sin(2 * np.pi * t / 100), scale=std)
+        return distribution
+
     def round(self, round: int) -> NDArray[np.float64]:
         return self._valuations[:, round]
 

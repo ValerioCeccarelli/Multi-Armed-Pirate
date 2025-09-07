@@ -178,19 +178,19 @@ def run_multiple_simulations(
 print("Task: Multiple items (3) with budget constraint")
 
 num_trials = 2
-time_horizon = 10_000
+time_horizon = 20_000
 num_prices = 10
 prices = np.linspace(0.1, 1.0, num_prices, dtype=np.float64)
 num_items = 3
-budget = 5000  # integer budget
+budget = 18000  # integer budget
 
 
 def env_builder() -> Environment:
     return StochasticEnvironment(
         distribution_functions=[
-            StochasticEnvironment.gaussian_distribution(mean=0.25, std=0.1),
-            StochasticEnvironment.gaussian_distribution(mean=0.25, std=0.1),
-            StochasticEnvironment.gaussian_distribution(mean=0.25, std=0.1),
+            StochasticEnvironment.gaussian_distribution(mean=0.30, std=0.1),
+            StochasticEnvironment.gaussian_distribution(mean=0.45, std=0.1),
+            StochasticEnvironment.gaussian_distribution(mean=0.55, std=0.1),
         ],
         num_rounds=time_horizon,
     )
@@ -285,12 +285,12 @@ plot_price_frequency_histograms(
     agents_names=["Combinatorial UCB"],
 )
 
-plot_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
-    prices=prices,
-    agents_names=["Baseline Agent"],
-)
+# plot_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
+#     prices=prices,
+#     agents_names=["Baseline Agent"],
+# )
 
 # Genera e salva animazione per l'agente Combinatorial UCB
 print("Generando animazione per l'agente Combinatorial UCB...")

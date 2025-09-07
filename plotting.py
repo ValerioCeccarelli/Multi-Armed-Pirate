@@ -421,101 +421,102 @@ def plot_conversion_rates(
 
     # Always create new figure with 2 subplots (agents vs baseline)
     fig, (ax_agents, ax_baseline) = plt.subplots(1, 2, figsize=(15, 6))
-    
+
     # Colors for different items
     colors = plt.cm.Set1(np.linspace(0, 1, max(num_items, 3)))
-    
+
     # === PLOT 1: BASELINE CONVERSION RATES ===
     for item_idx in range(num_items):
         price_success = {}
         price_failure = {}
-        
+
         for trial_idx in range(num_trials):
             for t in range(time_horizon):
                 curr_valuation = valuations[trial_idx, item_idx, t]
                 played_arm = baseline_played_arms[trial_idx, item_idx, t]
-                
+
                 if played_arm == -1:
                     break  # Budget exhausted
-                
+
                 price = prices[played_arm]
                 if curr_valuation >= price:
                     price_success[price] = price_success.get(price, 0) + 1
                 else:
                     price_failure[price] = price_failure.get(price, 0) + 1
-        
+
         # Calculate conversion rates for baseline
         baseline_prices = []
         baseline_rates = []
         all_prices = set(price_success.keys()) | set(price_failure.keys())
-        
+
         for price in sorted(all_prices):
             successes = price_success.get(price, 0)
             failures = price_failure.get(price, 0)
             total = successes + failures
-            
+
             if total > 0:
                 conversion_rate = (successes / total) * 100
                 baseline_prices.append(price)
                 baseline_rates.append(conversion_rate)
-        
+
         if baseline_prices:
             line_style = '-' if item_idx == 0 else '--'
             marker_style = 'o' if item_idx == 0 else 's'
             label = f'Item {item_idx + 1}' if num_items > 1 else 'Baseline'
-            
-            ax_baseline.plot(baseline_prices, baseline_rates, marker=marker_style, 
-                           linestyle=line_style, linewidth=2, markersize=6,
-                           label=label, color=colors[item_idx], alpha=0.8)
+
+            ax_baseline.plot(baseline_prices, baseline_rates, marker=marker_style,
+                             linestyle=line_style, linewidth=2, markersize=6,
+                             label=label, color=colors[item_idx], alpha=0.8)
 
     # === PLOT 2: AGENTS CONVERSION RATES ===
     for agent_idx in range(num_agents):
         for item_idx in range(num_items):
             price_success = {}
             price_failure = {}
-            
+
             # Collect success/failure data for this agent and item
             for trial_idx in range(num_trials):
                 for t in range(time_horizon):
                     curr_valuation = valuations[trial_idx, item_idx, t]
-                    played_arm = agents_played_arms[agent_idx, trial_idx, item_idx, t]
-                    
+                    played_arm = agents_played_arms[agent_idx,
+                                                    trial_idx, item_idx, t]
+
                     if played_arm == -1:
                         break  # Budget exhausted
-                    
+
                     price = prices[played_arm]
                     if curr_valuation >= price:
                         price_success[price] = price_success.get(price, 0) + 1
                     else:
                         price_failure[price] = price_failure.get(price, 0) + 1
-            
+
             # Calculate conversion rates
             agent_prices = []
             agent_rates = []
             all_prices = set(price_success.keys()) | set(price_failure.keys())
-            
+
             for price in sorted(all_prices):
                 successes = price_success.get(price, 0)
                 failures = price_failure.get(price, 0)
                 total = successes + failures
-                
+
                 if total > 0:
                     conversion_rate = (successes / total) * 100
                     agent_prices.append(price)
                     agent_rates.append(conversion_rate)
-            
+
             if agent_prices:
                 # Use different line styles for different items of the same agent
                 line_style = '-' if item_idx == 0 else '--'
                 marker_style = 'o' if item_idx == 0 else 's'
-                
+
                 label = f'{agents_names[agent_idx]}'
                 if num_items > 1:
                     label += f' Item {item_idx + 1}'
-                
-                ax_agents.plot(agent_prices, agent_rates, marker=marker_style, 
-                             linestyle=line_style, linewidth=2, markersize=6, 
-                             label=label, color=colors[item_idx])
+
+                ax_agents.plot(agent_prices, agent_rates, marker=marker_style,
+                               linestyle=line_style, linewidth=2, markersize=6,
+                               label=label, color=colors[item_idx])
 
     # Configure baseline plot
     ax_baseline.set_xlabel("Price")
@@ -541,11 +542,9 @@ def plot_conversion_rates(
         ax_agents.set_xlim(prices[0] - 0.05, prices[-1] + 0.05)
 
     plt.tight_layout()
-    
+
     if save_plot:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    
-    plt.show()
 
 
 def plot_budget_evolution(

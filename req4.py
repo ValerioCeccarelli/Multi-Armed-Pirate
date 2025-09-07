@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 import numpy as np
 from matplotlib import pyplot as plt
 
-from environments import Environment, NonStochasticSmoothChangeEnvironment
+from environments import Environment, NonStochasticSmoothChangeEnvironment, StochasticEnvironment
 from agents import Agent, MultiProductFFPrimalDualPricingAgent
 from baselines import OptimalDistributionMultiItemBaselineAgent
 from plotting import (
@@ -181,7 +181,7 @@ num_trials = 2
 time_horizon = 10_000
 prices = np.linspace(0.1, 1.0, 10)
 num_prices = len(prices)
-num_items = 4
+num_items = 3
 budget = 8_000
 
 
@@ -194,14 +194,22 @@ def env_builder() -> Environment:
     # )
     return NonStochasticSmoothChangeEnvironment(
         distribution_functions=[
+            # NonStochasticSmoothChangeEnvironment.generate_simple_tv(
+            #     time_horizon, 1),
+            # NonStochasticSmoothChangeEnvironment.generate_simple_tv(
+            #     time_horizon, 1),
+            # NonStochasticSmoothChangeEnvironment.generate_simple_tv(
+            #     time_horizon, 1),
+            # NonStochasticSmoothChangeEnvironment.generate_simple_tv(
+            #     time_horizon, 1),
+
             NonStochasticSmoothChangeEnvironment.generate_simple_tv(
                 time_horizon, 1),
-            NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-                time_horizon, 1),
-            NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-                time_horizon, 1),
-            NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-                time_horizon, 1),
+            NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
+                time_horizon, 50
+            ),
+            NonStochasticSmoothChangeEnvironment.gaussian_distribution(
+                mean=0.55, std=0.1),
         ],
         num_rounds=time_horizon,
     )
@@ -296,21 +304,21 @@ plot_price_frequency_histograms(
     agents_names=["MultiProduct Primal Dual"],
 )
 
-plot_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
-    prices=prices,
-    agents_names=["Baseline Agent"],
-)
+# plot_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
+#     prices=prices,
+#     agents_names=["Baseline Agent"],
+# )
 
 # Genera e salva animazione per l'agente MultiProduct Primal Dual
 print("Generando animazione per l'agente MultiProduct Primal Dual...")
-plot_animated_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-    prices=prices,
-    agents_names=["MultiProduct Primal Dual"],
-    save_path_prefix="req4_animation_multiproduct_primal_dual"
-)
+# plot_animated_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+#     prices=prices,
+#     agents_names=["MultiProduct Primal Dual"],
+#     save_path_prefix="req4_animation_multiproduct_primal_dual"
+# )
 
 plt.show()
