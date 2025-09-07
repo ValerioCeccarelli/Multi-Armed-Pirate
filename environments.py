@@ -135,8 +135,10 @@ class NonStochasticSmoothChangeEnvironment(Environment):
 
         def distribution(t: int) -> float:
             # Oscillating Alpha and Beta parameters
-            alpha_t = 1 + 4 * (0.5 + 0.5 * np.sin(freq * np.pi * t / time_horizon))
-            beta_t = 1 + 4 * (0.5 + 0.5 * np.cos(freq * np.pi * t / time_horizon))
+            alpha_t = 1 + 4 * \
+                (0.5 + 0.5 * np.sin(freq * np.pi * t / time_horizon))
+            beta_t = 1 + 4 * \
+                (0.5 + 0.5 * np.cos(freq * np.pi * t / time_horizon))
             return np.random.beta(alpha_t, beta_t)
 
         return distribution
@@ -159,8 +161,10 @@ class NonStochasticSmoothChangeEnvironment(Environment):
 
         def distribution(t: int) -> float:
             mu_t = mu0 + A * np.sin(2 * np.pi * f * t / T + phi)
-            sigma_t = sigma0 + A_sigma * np.sin(2 * np.pi * f * t / T + phi_sigma)
-            Sigma: np.ndarray = np.diag([sigma_t] * m) @ R @ np.diag([sigma_t] * m)
+            sigma_t = sigma0 + A_sigma * \
+                np.sin(2 * np.pi * f * t / T + phi_sigma)
+            Sigma: np.ndarray = np.diag(
+                [sigma_t] * m) @ R @ np.diag([sigma_t] * m)
             sample: np.ndarray = rng.multivariate_normal([mu_t] * m, Sigma)
             # print(sample.shape, sample)
             # raise NotImplementedError("Check the shape of the sample")
@@ -170,13 +174,13 @@ class NonStochasticSmoothChangeEnvironment(Environment):
 
     @classmethod
     def gaussian_distribution(
-        cls, mean: float = 0.5, std: float = 0.1, frequency: float = 100
+        cls, mean: float = 0.5, std: float = 0.1, freq: float = 100, magnitude: float = 0.1
     ) -> Callable[[int], float]:
         """Generate a Gaussian distribution function that oscillates."""
 
         def distribution(t: int) -> float:
             return np.random.normal(
-                loc=mean + 0.1 * np.sin(2 * np.pi * t / frequency), scale=std
+                loc=mean + magnitude * np.sin(freq * 2 * np.pi * t / 100), scale=std
             )
 
         return distribution
@@ -235,7 +239,8 @@ class NonStochasticAbruptChangeEnvironment(StochasticEnvironment):
         self._interval_length = num_rounds // self._num_intervals
 
         for t in range(num_rounds):
-            interval_index = min(t // self._interval_length, self._num_intervals - 1)
+            interval_index = min(t // self._interval_length,
+                                 self._num_intervals - 1)
             for item_index in range(self._num_items):
                 self._valuations[item_index, t] = distribution_functions[item_index][
                     interval_index
