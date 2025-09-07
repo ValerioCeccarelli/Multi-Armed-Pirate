@@ -153,7 +153,8 @@ def run_multiple_simulations(
     num_items = temp_env.num_items
     time_horizon = temp_env.time_horizon
 
-    valuations = np.zeros((num_trials, num_items, time_horizon), dtype=np.float64)
+    valuations = np.zeros(
+        (num_trials, num_items, time_horizon), dtype=np.float64)
 
     agent_played_arms = np.full(
         (num_trials, num_items, time_horizon), -1, dtype=np.int64
@@ -193,20 +194,14 @@ time_horizon = 20_000
 prices = np.linspace(0.1, 1.0, 10)
 num_prices = len(prices)
 num_items = 1
-budget = 2_000  # integer budget
+budget = 8_000
 
 
 def env_builder() -> Environment:
-    # return StochasticEnvironment(
-    #     distribution_functions=[
-    #         StochasticEnvironment.gaussian_distribution(mean=0.25, std=0.1),
-    #     ],
-    #     num_rounds=time_horizon,
-    # )
     return NonStochasticSmoothChangeEnvironment(
         distribution_functions=[
-            NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
-                time_horizon, 50
+            NonStochasticSmoothChangeEnvironment.gaussian_distribution(
+                mean=0.25, std=0.1, freq=10, magnitude=0.4
             ),
         ],
         num_rounds=time_horizon,
@@ -242,11 +237,18 @@ def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
     assert isinstance(
         config, BaselineAgentConfig
     ), f"Expected BaselineAgentConfig, got {type(config)}"
-    return OptimalDistributionSingleItemBaselineAgent(
+    # return OptimalDistributionSingleItemBaselineAgent(
+    #     prices=prices,
+    #     valuations=env.valuations,
+    #     time_horizon=time_horizon,
+    #     budget=config.budget,
+    # )
+    return FixedActionBaselineAgent(
         prices=prices,
-        valuations=env.valuations,
+        num_items=1,
         time_horizon=time_horizon,
-        budget=config.budget,
+        valuations=env.valuations,
+        budget=budget
     )
 
 
@@ -269,8 +271,8 @@ plot_cumulative_regret(
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
-    agents_names=["FFPrimalDualPricingAgent"],
-    title="Cumulative Regret: FFPrimalDualPricingAgent vs OptimalDistributionSingleItemBaselineAgent",
+    agents_names=["Primal Dual"],
+    title="Cumulative Regret: Primal Dual vs Baseline",
     ax=axes[0],
 )
 
@@ -278,10 +280,12 @@ plot_budget_evolution(
     valuations=results.valuations,
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["FFPrimalDualPricingAgent"],
+    agents_names=["Primal Dual"],
     initial_budget=budget,
     ax=axes[1],
 )
+
+fig.savefig("req3_cumulative_regret_and_budget_evolution.png")
 
 # Conversion rates as a separate plot with dual subplots
 plot_conversion_rates(
@@ -289,31 +293,30 @@ plot_conversion_rates(
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
-    agents_names=["FFPrimalDualPricingAgent"]
+    agents_names=["Primal Dual"],
+    save_path="req3_conversion_rates.png",
+    save_plot=True
 )
 
 plot_price_frequency_histograms(
     valuations=results.valuations,
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["FFPrimalDualPricingAgent"],
+    agents_names=["Primal Dual"],
+    save_plot=True,
+    save_path_prefix="req3_price_frequency"
 )
 
-plot_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
-    prices=prices,
-    agents_names=["OptimalDistributionSingleItemBaselineAgent"],
-)
+plt.show()
 
-# Genera e salva animazione per l'agente FFPrimalDualPricingAgent
-print("Generando animazione per l'agente FFPrimalDualPricingAgent...")
+# Genera e salva animazione per l'agente Primal Dual
+print("Generando animazione per l'agente Primal Dual...")
 plot_animated_price_frequency_histograms(
     valuations=results.valuations,
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["FFPrimalDualPricingAgent"],
-    save_path_prefix="req3_animation_ffprimal_dual"
+    agents_names=["Primal Dual"],
+    save_path_prefix="req3_animation_primal_dual"
 )
 
 plt.show()
