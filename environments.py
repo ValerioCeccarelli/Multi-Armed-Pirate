@@ -87,6 +87,52 @@ class StochasticEnvironment(Environment):
         return self._num_items
 
 
+class NonStochasticSmoothChangeEnvironment(Environment):
+    def __init__(self, distribution_functions: list[Callable[[int], float]], num_rounds: int, seed: int = 42):
+        """
+        Non-stationary environment where valuations change smoothly over time.
+
+        Args:
+            distribution_functions (list[Callable[[int], float]]): Functions to generate valuations based on round (num_items,)
+            num_rounds (int): Total number of rounds.
+            seed (int): Random seed for reproducibility.
+        """
+        self._num_items = len(distribution_functions)
+        self._num_rounds = num_rounds
+        self._rng = np.random.default_rng(seed)
+        self._valuations = np.array(
+            [[distribution_func(t) for t in range(num_rounds)]
+             for distribution_func in distribution_functions]
+        ).astype(np.float64)
+
+    @classmethod
+    def generate_beta_valuations(cls, time_horizon: int, freq: int) -> Callable[[int], float]:
+        """Generate Beta valuations with oscillating parameters"""
+        def distribution(t: int) -> float:
+            # Oscillating Alpha and Beta parameters
+            alpha_t = 1 + 4 * \
+                (0.5 + 0.5 * np.sin(freq * np.pi * t / time_horizon))
+            beta_t = 1 + 4 * \
+                (0.5 + 0.5 * np.cos(freq * np.pi * t / time_horizon))
+            return np.random.beta(alpha_t, beta_t)
+        return distribution
+
+    def round(self, round: int) -> NDArray[np.float64]:
+        return self._valuations[:, round]
+
+    @property
+    def valuations(self) -> NDArray[np.float64]:
+        return self._valuations
+
+    @property
+    def time_horizon(self) -> int:
+        return self._num_rounds
+
+    @property
+    def num_items(self) -> int:
+        return self._num_items
+
+
 if __name__ == "__main__":
     print("Stochastic Environment Test...")
 
