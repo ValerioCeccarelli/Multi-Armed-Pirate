@@ -1,13 +1,13 @@
 from dataclasses import dataclass
-from typing import Callable, TypeVar
+from typing import Callable
 from numpy.typing import NDArray
 import numpy as np
 from matplotlib import pyplot as plt
 
-from environments import Environment, NonStochasticSmoothChangeEnvironment, StochasticEnvironment
-from agents import Agent, MultiProductFFPrimalDualPricingAgent
-from baselines import OptimalDistributionMultiItemBaselineAgent
-from plotting import (
+from ..environments import Environment, NonStochasticSmoothChangeEnvironment, StochasticEnvironment
+from ..agents import Agent, MultiProductFFPrimalDualPricingAgent, CombinatorialUCBBidding
+from ..baselines import OptimalDistributionMultiItemBaselineAgent
+from ..plotting import (
     plot_price_frequency_histograms,
     plot_cumulative_regret,
     plot_budget_evolution,
@@ -99,26 +99,20 @@ class RunMultipleSimulationsResult:
 
     Attributes:
         valuations: Valuations tensor (num_trials, num_items, time_horizon)
-        played_arms: Played arms tensor (num_trials, num_items, time_horizon) (-1 if not played else arm_index)
+        played_arms: Played arms tensor (num_agents, num_trials, num_items, time_horizon) (-1 if not played else arm_index)
     """
 
     valuations: NDArray[np.float64]  # (num_trials, num_items, time_horizon)
     # (num_trials, num_items, time_horizon) (-1/int)
-    agent_played_arms: NDArray[np.int64]
+    agents_played_arms: NDArray[np.int64]
     baseline_played_arms: NDArray[np.int64]
-
-
-AgentConfigType = TypeVar("AgentConfigType")
-BaselineConfigType = TypeVar("BaselineConfigType")
 
 
 def run_multiple_simulations(
     env_builder: Callable[[], Environment],
-    agent_builder: Callable[[AgentConfigType], Agent],
-    baseline_builder: Callable[[BaselineConfigType, Environment], Agent],
+    agent_builders: list[Callable[[Environment], Agent]],
+    baseline_builder: Callable[[Environment], Agent],
     num_trials: int,
-    agent_config: AgentConfigType,
-    baseline_config: BaselineConfigType,
     prices: NDArray[np.float64],
 ) -> RunMultipleSimulationsResult:
     """
@@ -140,12 +134,13 @@ def run_multiple_simulations(
     temp_env = env_builder()
     num_items = temp_env.num_items
     time_horizon = temp_env.time_horizon
+    num_agents = len(agent_builders)
 
     valuations = np.zeros(
         (num_trials, num_items, time_horizon), dtype=np.float64)
 
-    agent_played_arms = np.full(
-        (num_trials, num_items, time_horizon), -1, dtype=np.int64
+    agents_played_arms = np.full(
+        (num_agents, num_trials, num_items, time_horizon), -1, dtype=np.int64
     )
     baseline_played_arms = np.full(
         (num_trials, num_items, time_horizon), -1, dtype=np.int64
@@ -154,21 +149,22 @@ def run_multiple_simulations(
     for trial in range(num_trials):
         print(f"Running trial {trial + 1}/{num_trials}...")
         env = env_builder()
-        agent = agent_builder(agent_config)
-        baseline_agent = baseline_builder(baseline_config, env)
 
-        agent_result = run_simulation(env, agent, prices)
+        baseline_agent = baseline_builder(env)
         baseline_results = run_simulation(env, baseline_agent, prices)
-
-        # (num_items, time_horizon)
-        valuations[trial] = agent_result.valuations
-        # (num_items, time_horizon)
-        agent_played_arms[trial] = agent_result.played_arms
         baseline_played_arms[trial] = baseline_results.played_arms
+
+        for i, agent_builder in enumerate(agent_builders):
+            print(f"  Running agent {i + 1}/{num_agents}...")
+            agent = agent_builder(env)
+            agent_result = run_simulation(env, agent, prices)
+            agents_played_arms[i, trial] = agent_result.played_arms
+
+        valuations[trial] = env.valuations
 
     return RunMultipleSimulationsResult(
         valuations=valuations,
-        agent_played_arms=agent_played_arms,
+        agents_played_arms=agents_played_arms,
         baseline_played_arms=baseline_played_arms,
     )
 
@@ -183,6 +179,8 @@ prices = np.linspace(0.1, 1.0, 10)
 num_prices = len(prices)
 num_items = 3
 budget = 8_000
+
+primal_dual_eta = 1 / np.sqrt(time_horizon)
 
 
 def env_builder() -> Environment:
@@ -215,55 +213,42 @@ def env_builder() -> Environment:
     )
 
 
-@dataclass
-class MultiProductFFPrimalDualPricingAgentConfig:
-    num_items: int
-    num_prices: int
-    budget: int
-    eta: float = 0.1
-
-
-def combinatorial_agent_builder(config: MultiProductFFPrimalDualPricingAgentConfig) -> Agent:
-    assert isinstance(
-        config, MultiProductFFPrimalDualPricingAgentConfig
-    ), f"Expected MultiProductFFPrimalDualPricingAgentConfig, got {type(config)}"
-    return MultiProductFFPrimalDualPricingAgent(
-        prices=prices,
-        B=config.budget,
-        T=time_horizon,
-        n_products=config.num_items,
-        eta=config.eta,
+def combinatorial_agent_builder(env: Environment) -> Agent:
+    return CombinatorialUCBBidding(
+        num_items=env.num_items,
+        price_set=prices,
+        budget=budget,
+        time_horizon=env.time_horizon,
     )
 
 
-@dataclass
-class BaselineAgentConfig:
-    # if None, no constraint in scheduling (evaluation still considers budget)
-    budget: int | None = None
+def primal_dual_agent_builder(env: Environment) -> Agent:
+    return MultiProductFFPrimalDualPricingAgent(
+        prices=prices,
+        B=budget,
+        T=time_horizon,
+        n_products=num_items,
+        eta=primal_dual_eta,
+    )
 
 
-def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
-    assert isinstance(
-        config, BaselineAgentConfig
-    ), f"Expected BaselineAgentConfig, got {type(config)}"
+def baseline_builder(env: Environment) -> Agent:
     return OptimalDistributionMultiItemBaselineAgent(
         prices=prices,
         valuations=env.valuations,
         time_horizon=time_horizon,
-        budget=config.budget,
+        budget=budget,
     )
 
 
 results = run_multiple_simulations(
     env_builder=env_builder,
-    agent_builder=combinatorial_agent_builder,
+    agent_builders=[
+        primal_dual_agent_builder,
+        combinatorial_agent_builder
+    ],
     baseline_builder=baseline_builder,
     num_trials=num_trials,
-    agent_config=MultiProductFFPrimalDualPricingAgentConfig(
-        num_items=num_items, num_prices=num_prices, budget=budget, eta=1 /
-        np.sqrt(time_horizon)
-    ),
-    baseline_config=BaselineAgentConfig(budget=budget),
     prices=prices,
 )
 
@@ -271,54 +256,78 @@ fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
 plot_cumulative_regret(
     valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    agents_played_arms=results.agents_played_arms[0][np.newaxis, ...],
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
-    agents_names=["MultiProduct Primal Dual"],
+    agents_names=["Primal Dual"],
+    title="Cumulative Regret: MultiProduct Primal Dual",
+    ax=axes[0],
+)
+
+plot_budget_evolution(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[0][np.newaxis, ...],
+    prices=prices,
+    agents_names=["Primal Dual"],
+    initial_budget=budget,
+    ax=axes[1],
+)
+
+fig.savefig("req4_primaldual_cumregret_budgetevolution.png")
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+plot_cumulative_regret(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms,
+    baseline_played_arms=results.baseline_played_arms,
+    prices=prices,
+    agents_names=["Primal Dual", "Combinatorial UCB"],
     title="Cumulative Regret: MultiProduct Primal Dual vs Optimal Baseline",
     ax=axes[0],
 )
 
 plot_budget_evolution(
     valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    agents_played_arms=results.agents_played_arms,
     prices=prices,
-    agents_names=["MultiProduct Primal Dual"],
+    agents_names=["Primal Dual", "Combinatorial UCB"],
     initial_budget=budget,
     ax=axes[1],
 )
 
+fig.savefig("req4_primaldual_vs_combucb_cumregret_budgetevolution.png")
+
 # Conversion rates as a separate plot with dual subplots
 plot_conversion_rates(
     valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    agents_played_arms=results.agents_played_arms[0][np.newaxis, ...],
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
-    agents_names=["MultiProduct Primal Dual"]
+    agents_names=["Primal Dual"],
+    save_plot=True,
+    save_path="req4_primaldual_conversion_rates.png",
 )
 
 plot_price_frequency_histograms(
     valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    agents_played_arms=results.agents_played_arms,
     prices=prices,
-    agents_names=["MultiProduct Primal Dual"],
+    agents_names=["Primal Dual", "Combinatorial UCB"],
+    save_plot=True,
+    save_path_prefix="req4_primaldual_price_histograms"
 )
 
-# plot_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
-#     prices=prices,
-#     agents_names=["Baseline Agent"],
-# )
+plt.show()
 
 # Genera e salva animazione per l'agente MultiProduct Primal Dual
 print("Generando animazione per l'agente MultiProduct Primal Dual...")
-# plot_animated_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-#     prices=prices,
-#     agents_names=["MultiProduct Primal Dual"],
-#     save_path_prefix="req4_animation_multiproduct_primal_dual"
-# )
+plot_animated_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[0][np.newaxis, ...],
+    prices=prices,
+    agents_names=["Primal Dual"],
+    save_path_prefix="req4_animation_primal_dual"
+)
 
 plt.show()
