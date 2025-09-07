@@ -23,6 +23,7 @@ class Agent(ABC):
         pass
 
 
+# Task 1.1
 class UCBAgent(Agent):
     """
     Upper Confidence Bound (UCB) agent for multi-armed bandit problems.
@@ -67,287 +68,7 @@ class UCBAgent(Agent):
         self._last_price_index = -1  # Reset for next round
 
 
-class PrimalDualAgent(Agent):
-    """
-    Primal-Dual agent with Bandit Feedback for pricing.
-    This agent only supports a single item (num_items=1).
-    Uses EXP3.P as the primal sub-agent and updates a dual variable lambda.
-    """
-
-    def __init__(self, num_prices: int, budget: float, horizon: int, eta: float = None):
-        assert num_prices > 1, "PrimalDual agent requires at least 2 prices."
-        self.num_prices = num_prices
-        self.budget = budget
-        self.horizon = horizon
-        self.eta = eta if eta is not None else 1 / math.sqrt(horizon)
-
-        # EXP3.P as the primal agent
-        self.exp3p = Exp3PAgent(K=num_prices, T=horizon, delta=0.05)
-
-        # Budget and pacing
-        self.remaining_budget = budget
-        self.rho = budget / horizon  # pacing rate
-
-        # Dual variable
-        self.lmbd = 1.0
-
-        # Tracking
-        self.total_counts = 0
-        self._last_price_index = -1
-
-    def pull_arm(self) -> NDArray[np.int64]:
-        if self.remaining_budget < 1:
-            # Budget depleted
-            self._last_price_index = -1
-            return np.array([-1], dtype=np.int64)
-
-        price_index = self.exp3p.pull_arm()
-        self._last_price_index = price_index
-        return np.array([price_index], dtype=np.int64)
-
-    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
-        if self._last_price_index == -1:
-            # No arm was pulled (budget depleted)
-            return
-
-        reward = rewards[0]
-
-        # Determine if a sale occurred (cost = 1 if sale, 0 otherwise)
-        # We assume reward > 0 means a sale occurred
-        cost = 1.0 if reward > 0 else 0.0
-
-        # Update budget
-        self.remaining_budget -= cost
-        self.total_counts += 1
-
-        # Compute normalized reward for EXP3.P
-        # The Lagrangian is: reward - lambda * (cost - rho)
-        net_reward = reward - self.lmbd * (cost - self.rho)
-
-        # Normalize to [0,1] for EXP3.P
-        # Assuming price range is [0, 1], max possible reward is 1
-        max_possible = 1.0 - self.lmbd * (0 - self.rho)  # when cost=0
-        min_possible = 0.0 - self.lmbd * \
-            (1 - self.rho)  # when cost=1, reward=0
-
-        if max_possible > min_possible:
-            normalized_reward = (net_reward - min_possible) / \
-                (max_possible - min_possible)
-        else:
-            normalized_reward = 0.5  # fallback
-
-        # Clamp to [0,1]
-        normalized_reward = np.clip(normalized_reward, 0.0, 1.0)
-
-        # Update EXP3.P
-        self.exp3p.probs = self.exp3p._compute_probs()
-        self.exp3p.update(self._last_price_index, normalized_reward)
-
-        # Update dual variable lambda
-        self.lmbd = np.clip(
-            self.lmbd - self.eta * (self.rho - cost),
-            a_min=0.0,
-            a_max=1.0 / self.rho if self.rho > 0 else 1.0
-        )
-
-        self._last_price_index = -1  # Reset for next round
-
-
-class MultiProductPrimalDualAgent(Agent):
-    """
-    Primal-Dual agent with Bandit Feedback for multi-product pricing.
-    Uses separate EXP3.P agents for each product and a shared dual variable lambda.
-    """
-
-    def __init__(self, num_items: int, num_prices: int, budget: float, horizon: int, eta: float = None):
-        assert num_items > 0, "MultiProduct agent requires at least 1 item."
-        assert num_prices > 1, "MultiProduct agent requires at least 2 prices per item."
-
-        self.num_items = num_items
-        self.num_prices = num_prices
-        self.budget = budget
-        self.horizon = horizon
-        self.eta = eta if eta is not None else 1 / \
-            math.sqrt(num_items * horizon)
-
-        # EXP3.P agents - one for each product
-        self.exp3p_agents = [
-            Exp3PAgent(K=num_prices, T=horizon, delta=0.05)
-            for _ in range(num_items)
-        ]
-
-        # Budget and pacing
-        self.remaining_budget = budget
-        self.rho = budget / (num_items * horizon)  # pacing rate per item
-
-        # Dual variable (shared across all products)
-        self.lmbd = 1.0
-
-        # Tracking
-        self.total_counts = 0
-        self._last_price_indices = [-1] * num_items
-
-    def pull_arm(self) -> NDArray[np.int64]:
-        if self.remaining_budget < 1:
-            # Budget depleted
-            self._last_price_indices = [-1] * self.num_items
-            return np.array([-1] * self.num_items, dtype=np.int64)
-
-        # Each EXP3.P agent selects a price for its product
-        price_indices = []
-        for i in range(self.num_items):
-            price_index = self.exp3p_agents[i].pull_arm()
-            price_indices.append(price_index)
-
-        self._last_price_indices = price_indices
-        return np.array(price_indices, dtype=np.int64)
-
-    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
-        if any(idx == -1 for idx in self._last_price_indices):
-            # No arms were pulled (budget depleted)
-            return
-
-        total_revenue = 0.0
-        total_sales = 0
-
-        # Process each product
-        for j in range(self.num_items):
-            price_index = self._last_price_indices[j]
-            reward = rewards[j]
-
-            # Determine if a sale occurred
-            cost = 1.0 if reward > 0 else 0.0
-
-            total_revenue += reward
-            total_sales += cost
-
-            # Compute normalized reward for EXP3.P
-            # The Lagrangian is: reward - lambda * (cost - rho)
-            net_reward = reward - self.lmbd * (cost - self.rho)
-
-            # Normalize to [0,1] for EXP3.P
-            # Assuming max price is 1.0
-            max_possible = 1.0 - self.lmbd * (0 - self.rho)  # when cost=0
-            min_possible = 0.0 - self.lmbd * \
-                (1 - self.rho)  # when cost=1, reward=0
-
-            if max_possible > min_possible:
-                normalized_reward = (net_reward - min_possible) / \
-                    (max_possible - min_possible)
-            else:
-                normalized_reward = 0.5  # fallback
-
-            # Clamp to [0,1]
-            normalized_reward = np.clip(normalized_reward, 0.0, 1.0)
-
-            # Update the corresponding EXP3.P agent
-            agent = self.exp3p_agents[j]
-            agent.probs = agent._compute_probs()
-            agent.update(price_index, normalized_reward)
-
-        # Update budget
-        self.remaining_budget -= total_sales
-        self.total_counts += 1
-
-        # Update dual variable lambda (shared across all products)
-        # The constraint is: expected total consumption <= rho * num_items
-        self.lmbd = np.clip(
-            self.lmbd - self.eta * (self.rho * self.num_items - total_sales),
-            a_min=0.0,
-            a_max=1.0 / self.rho if self.rho > 0 else 1.0
-        )
-
-        # Reset for next round
-        self._last_price_indices = [-1] * self.num_items
-
-
-class Exp3PAgent(Agent):
-    def __init__(self, K: int, T: int, delta: float = 0.1):
-        self.K = K
-        self.T = T
-        self.delta = delta
-        self.eta = math.log(K / delta) / (T * K)
-        self.gamma = 0.95 * math.log(K) / (T * K)
-        self.beta = K * math.log(K) / T
-        self.G = np.zeros(K)
-        self.probs = np.ones(K) / K
-
-    def _compute_probs(self) -> np.ndarray:
-        expG = np.exp(self.eta * self.G)
-        base = (1 - self.gamma) * (expG / expG.sum())
-        probs = base + self.gamma / self.K
-        return probs / probs.sum()
-
-    def pull_arm(self) -> int:
-        self.probs = self._compute_probs()
-        choice = int(np.random.choice(self.K, p=self.probs))
-        return choice
-
-    def update(self, chosen: int, reward: float) -> None:
-        for i in range(self.K):
-            if i != chosen:
-                self.G[i] += self.beta / self.probs[i]
-            else:
-                self.G[i] += (reward + self.beta) / self.probs[i]
-
-
-class BanditFeedbackPrimalDual(Agent):
-    """Primal-Dual agent with Bandit Feedback for non-stationary pricing using EXP3.P."""
-
-    def __init__(self, prices: np.ndarray, T: int, B: float) -> None:
-        self.prices: np.ndarray = np.array(prices)
-        self.K: int = len(prices)
-        self.T: int = T
-        self.B: float = B
-        self.eta: float = 1 / np.sqrt(T)
-        self.rng = np.random.default_rng()
-        # Use EXP3.P as the primal (hedge) agent with a given delta
-        self.exp3p: Exp3PAgent = Exp3PAgent(K=self.K, T=self.T, delta=0.05)
-        self.rho: float = B / T
-        self.lmbd: float = 1.0
-        self.pull_counts: np.ndarray = np.zeros(self.K, int)
-        self.last_arm: Optional[int] = None
-        # History tracking for analysis
-        self.lmbd_history: list[float] = []
-        self.exp3p_weight_history: list[np.ndarray] = []
-
-    def pull_arm(self) -> NDArray[np.int64]:
-        if self.B < 1:
-            self.last_arm = None
-            return np.array([-1])
-        self.last_arm = self.exp3p.pull_arm()
-        return np.array([self.last_arm])
-
-    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
-        if self.last_arm is None:
-            return
-
-        price_chosen = self.prices[self.last_arm]
-        c_t = 1 if rewards[0] > 0 else 0  # cost is 1 if sold, 0 otherwise
-
-        f_t = rewards[0]  # revenue is the reward received
-        self.B -= c_t
-        self.pull_counts[self.last_arm] += 1
-
-        net = f_t - self.lmbd * (c_t - self.rho)
-
-        # Normalize
-        p_max = self.prices.max()
-        L_up = p_max - self.lmbd * (0 - self.rho)
-        L_low = 0.0 - self.lmbd * (1 - self.rho)
-        norm_factor = L_up - L_low + 1e-12
-        net_norm = (net - L_low) / norm_factor
-
-        # Update the EXP3.P sub-agent using the bandit reward feedback for the chosen arm
-        self.exp3p.probs = self.exp3p._compute_probs()
-        self.exp3p.update(self.last_arm, net_norm)
-
-        # Update the dual variable lambda
-        self.lmbd = np.clip(self.lmbd - self.eta *
-                            (self.rho - c_t), a_min=0.0, a_max=1.0 / self.rho)
-        self.lmbd_history.append(self.lmbd)
-
-
+# Task 1.2 & Task 2
 class CombinatorialUCBBidding:
     """
     Agent for combinatorial bidding using Upper Confidence Bound (UCB).
@@ -611,3 +332,288 @@ class CombinatorialUCBBidding:
         assert np.all(c in (0, 1) for c in costs)
         self.remaining_budget -= np.sum(costs)
         self.current_round += 1
+
+
+# Task 3
+class PrimalDualAgent(Agent):
+    """
+    Primal-Dual agent with Bandit Feedback for pricing.
+    This agent only supports a single item (num_items=1).
+    Uses EXP3.P as the primal sub-agent and updates a dual variable lambda.
+    """
+
+    def __init__(self, num_prices: int, budget: float, horizon: int, eta: float = None):
+        assert num_prices > 1, "PrimalDual agent requires at least 2 prices."
+        self.num_prices = num_prices
+        self.budget = budget
+        self.horizon = horizon
+        self.eta = eta if eta is not None else 1 / math.sqrt(horizon)
+
+        # EXP3.P as the primal agent
+        self.exp3p = Exp3PAgent(K=num_prices, T=horizon, delta=0.05)
+
+        # Budget and pacing
+        self.remaining_budget = budget
+        self.rho = budget / horizon  # pacing rate
+
+        # Dual variable
+        self.lmbd = 1.0
+
+        # Tracking
+        self.total_counts = 0
+        self._last_price_index = -1
+
+    def pull_arm(self) -> NDArray[np.int64]:
+        if self.remaining_budget < 1:
+            # Budget depleted
+            self._last_price_index = -1
+            return np.array([-1], dtype=np.int64)
+
+        price_index = self.exp3p.pull_arm()
+        self._last_price_index = price_index
+        return np.array([price_index], dtype=np.int64)
+
+    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
+        if self._last_price_index == -1:
+            # No arm was pulled (budget depleted)
+            return
+
+        reward = rewards[0]
+
+        # Determine if a sale occurred (cost = 1 if sale, 0 otherwise)
+        # We assume reward > 0 means a sale occurred
+        cost = 1.0 if reward > 0 else 0.0
+
+        # Update budget
+        self.remaining_budget -= cost
+        self.total_counts += 1
+
+        # Compute normalized reward for EXP3.P
+        # The Lagrangian is: reward - lambda * (cost - rho)
+        net_reward = reward - self.lmbd * (cost - self.rho)
+
+        # Normalize to [0,1] for EXP3.P
+        # Assuming price range is [0, 1], max possible reward is 1
+        max_possible = 1.0 - self.lmbd * (0 - self.rho)  # when cost=0
+        min_possible = 0.0 - self.lmbd * \
+            (1 - self.rho)  # when cost=1, reward=0
+
+        if max_possible > min_possible:
+            normalized_reward = (net_reward - min_possible) / \
+                (max_possible - min_possible)
+        else:
+            normalized_reward = 0.5  # fallback
+
+        # Clamp to [0,1]
+        normalized_reward = np.clip(normalized_reward, 0.0, 1.0)
+
+        # Update EXP3.P
+        self.exp3p.probs = self.exp3p._compute_probs()
+        self.exp3p.update(self._last_price_index, normalized_reward)
+
+        # Update dual variable lambda
+        self.lmbd = np.clip(
+            self.lmbd - self.eta * (self.rho - cost),
+            a_min=0.0,
+            a_max=1.0 / self.rho if self.rho > 0 else 1.0
+        )
+
+        self._last_price_index = -1  # Reset for next round
+
+
+# Task 3 :)
+class Exp3PAgent(Agent):
+    def __init__(self, K: int, T: int, delta: float = 0.1):
+        self.K = K
+        self.T = T
+        self.delta = delta
+        self.eta = math.log(K / delta) / (T * K)
+        self.gamma = 0.95 * math.log(K) / (T * K)
+        self.beta = K * math.log(K) / T
+        self.G = np.zeros(K)
+        self.probs = np.ones(K) / K
+
+    def _compute_probs(self) -> np.ndarray:
+        expG = np.exp(self.eta * self.G)
+        base = (1 - self.gamma) * (expG / expG.sum())
+        probs = base + self.gamma / self.K
+        return probs / probs.sum()
+
+    def pull_arm(self) -> int:
+        self.probs = self._compute_probs()
+        choice = int(np.random.choice(self.K, p=self.probs))
+        return choice
+
+    def update(self, chosen: int, reward: float) -> None:
+        for i in range(self.K):
+            if i != chosen:
+                self.G[i] += self.beta / self.probs[i]
+            else:
+                self.G[i] += (reward + self.beta) / self.probs[i]
+
+
+# Task 3 :)
+class BanditFeedbackPrimalDual(Agent):
+    """Primal-Dual agent with Bandit Feedback for non-stationary pricing using EXP3.P."""
+
+    def __init__(self, prices: np.ndarray, T: int, B: float) -> None:
+        self.prices: np.ndarray = np.array(prices)
+        self.K: int = len(prices)
+        self.T: int = T
+        self.B: float = B
+        self.eta: float = 1 / np.sqrt(T)
+        self.rng = np.random.default_rng()
+        # Use EXP3.P as the primal (hedge) agent with a given delta
+        self.exp3p: Exp3PAgent = Exp3PAgent(K=self.K, T=self.T, delta=0.05)
+        self.rho: float = B / T
+        self.lmbd: float = 1.0
+        self.pull_counts: np.ndarray = np.zeros(self.K, int)
+        self.last_arm: Optional[int] = None
+        # History tracking for analysis
+        self.lmbd_history: list[float] = []
+        self.exp3p_weight_history: list[np.ndarray] = []
+
+    def pull_arm(self) -> NDArray[np.int64]:
+        if self.B < 1:
+            self.last_arm = None
+            return np.array([-1])
+        self.last_arm = self.exp3p.pull_arm()
+        return np.array([self.last_arm])
+
+    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
+        if self.last_arm is None:
+            return
+
+        price_chosen = self.prices[self.last_arm]
+        c_t = 1 if rewards[0] > 0 else 0  # cost is 1 if sold, 0 otherwise
+
+        f_t = rewards[0]  # revenue is the reward received
+        self.B -= c_t
+        self.pull_counts[self.last_arm] += 1
+
+        net = f_t - self.lmbd * (c_t - self.rho)
+
+        # Normalize
+        p_max = self.prices.max()
+        L_up = p_max - self.lmbd * (0 - self.rho)
+        L_low = 0.0 - self.lmbd * (1 - self.rho)
+        norm_factor = L_up - L_low + 1e-12
+        net_norm = (net - L_low) / norm_factor
+
+        # Update the EXP3.P sub-agent using the bandit reward feedback for the chosen arm
+        self.exp3p.probs = self.exp3p._compute_probs()
+        self.exp3p.update(self.last_arm, net_norm)
+
+        # Update the dual variable lambda
+        self.lmbd = np.clip(self.lmbd - self.eta *
+                            (self.rho - c_t), a_min=0.0, a_max=1.0 / self.rho)
+        self.lmbd_history.append(self.lmbd)
+
+
+# Task 4
+class MultiProductPrimalDualAgent(Agent):
+    """
+    Primal-Dual agent with Bandit Feedback for multi-product pricing.
+    Uses separate EXP3.P agents for each product and a shared dual variable lambda.
+    """
+
+    def __init__(self, num_items: int, num_prices: int, budget: float, horizon: int, eta: float = None):
+        assert num_items > 0, "MultiProduct agent requires at least 1 item."
+        assert num_prices > 1, "MultiProduct agent requires at least 2 prices per item."
+
+        self.num_items = num_items
+        self.num_prices = num_prices
+        self.budget = budget
+        self.horizon = horizon
+        self.eta = eta if eta is not None else 1 / \
+            math.sqrt(num_items * horizon)
+
+        # EXP3.P agents - one for each product
+        self.exp3p_agents = [
+            Exp3PAgent(K=num_prices, T=horizon, delta=0.05)
+            for _ in range(num_items)
+        ]
+
+        # Budget and pacing
+        self.remaining_budget = budget
+        self.rho = budget / (num_items * horizon)  # pacing rate per item
+
+        # Dual variable (shared across all products)
+        self.lmbd = 1.0
+
+        # Tracking
+        self.total_counts = 0
+        self._last_price_indices = [-1] * num_items
+
+    def pull_arm(self) -> NDArray[np.int64]:
+        if self.remaining_budget < 1:
+            # Budget depleted
+            self._last_price_indices = [-1] * self.num_items
+            return np.array([-1] * self.num_items, dtype=np.int64)
+
+        # Each EXP3.P agent selects a price for its product
+        price_indices = []
+        for i in range(self.num_items):
+            price_index = self.exp3p_agents[i].pull_arm()
+            price_indices.append(price_index)
+
+        self._last_price_indices = price_indices
+        return np.array(price_indices, dtype=np.int64)
+
+    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
+        if any(idx == -1 for idx in self._last_price_indices):
+            # No arms were pulled (budget depleted)
+            return
+
+        total_revenue = 0.0
+        total_sales = 0
+
+        # Process each product
+        for j in range(self.num_items):
+            price_index = self._last_price_indices[j]
+            reward = rewards[j]
+
+            # Determine if a sale occurred
+            cost = 1.0 if reward > 0 else 0.0
+
+            total_revenue += reward
+            total_sales += cost
+
+            # Compute normalized reward for EXP3.P
+            # The Lagrangian is: reward - lambda * (cost - rho)
+            net_reward = reward - self.lmbd * (cost - self.rho)
+
+            # Normalize to [0,1] for EXP3.P
+            # Assuming max price is 1.0
+            max_possible = 1.0 - self.lmbd * (0 - self.rho)  # when cost=0
+            min_possible = 0.0 - self.lmbd * \
+                (1 - self.rho)  # when cost=1, reward=0
+
+            if max_possible > min_possible:
+                normalized_reward = (net_reward - min_possible) / \
+                    (max_possible - min_possible)
+            else:
+                normalized_reward = 0.5  # fallback
+
+            # Clamp to [0,1]
+            normalized_reward = np.clip(normalized_reward, 0.0, 1.0)
+
+            # Update the corresponding EXP3.P agent
+            agent = self.exp3p_agents[j]
+            agent.probs = agent._compute_probs()
+            agent.update(price_index, normalized_reward)
+
+        # Update budget
+        self.remaining_budget -= total_sales
+        self.total_counts += 1
+
+        # Update dual variable lambda (shared across all products)
+        # The constraint is: expected total consumption <= rho * num_items
+        self.lmbd = np.clip(
+            self.lmbd - self.eta * (self.rho * self.num_items - total_sales),
+            a_min=0.0,
+            a_max=1.0 / self.rho if self.rho > 0 else 1.0
+        )
+
+        # Reset for next round
+        self._last_price_indices = [-1] * self.num_items

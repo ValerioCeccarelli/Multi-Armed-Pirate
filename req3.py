@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from environments import Environment, StochasticEnvironment
-from agents import Agent, PrimalDualAgent, BanditFeedbackPrimalDual
+from agents import Agent, PrimalDualAgent, BanditFeedbackPrimalDual, NonStochasticSmoothChangeEnvironment
 from baselines import FixedActionBaselineAgent, OptimalDistributionSingleItemBaselineAgent
 from plotting import (
     plot_price_frequency_histograms,
@@ -184,9 +184,16 @@ budget = 5000  # integer budget
 
 
 def env_builder() -> Environment:
-    return StochasticEnvironment(
+    # return StochasticEnvironment(
+    #     distribution_functions=[
+    #         StochasticEnvironment.gaussian_distribution(mean=0.25, std=0.1),
+    #     ],
+    #     num_rounds=time_horizon,
+    # )
+    return NonStochasticSmoothChangeEnvironment(
         distribution_functions=[
-            StochasticEnvironment.gaussian_distribution(mean=0.25, std=0.1),
+            NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
+                time_horizon, 50),
         ],
         num_rounds=time_horizon,
     )
