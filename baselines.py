@@ -133,7 +133,7 @@ class FixedActionBaselineAgent:
         return self.optimal_indexes
 
     def update(
-        self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None
+        self, rewards: NDArray[np.float64], valuations: NDArray[np.float64] = None
     ) -> None:
         self.current_round += 1
 
@@ -205,7 +205,7 @@ class PerfectBaseline:
         return self.schedule[:, t]
 
     def update(
-        self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None
+        self, rewards: NDArray[np.float64], valuations: NDArray[np.float64] = None
     ) -> None:
         self.current_round += 1
 
@@ -307,7 +307,7 @@ class OptimalDistributionMultiItemBaselineAgent:
             )
         return sampled_indexes
 
-    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
+    def update(self, rewards: NDArray[np.float64], valuations: NDArray[np.float64] = None) -> None:
         pass
 
 

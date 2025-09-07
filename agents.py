@@ -1,7 +1,6 @@
-import math
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,13 +15,13 @@ class Agent(ABC):
 
     @abstractmethod
     def update(
-        self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None
+        self, rewards: NDArray[np.float64], valuations: NDArray[np.float64] = None
     ) -> None:
         """Update the agent's knowledge based on the results of the round.
 
         Args:
             rewards: Rewards received for each item. (num_items,)
-            full_rewards: Full rewards (valuations) for each item. (num_items, num_prices) Only used in some agents.
+            valuations: Valuations for each item. (num_items, ) Only used in full-feedback.
         """
         pass
 
@@ -62,7 +61,7 @@ class UCBAgent(Agent):
         return np.array([price_index], dtype=np.int64)
 
     def update(
-        self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None
+        self, rewards: NDArray[np.float64], valuations: NDArray[np.float64] = None
     ) -> None:
         assert self._last_price_index != -1, "pull_arm must be called before update."
 
@@ -119,7 +118,8 @@ class CombinatorialUCBBidding:
         self.current_round = 0
         self.last_chosen_price_indices = np.zeros(self.num_items, dtype=int)
 
-        self.schedule = np.ones((self.num_items, self.time_horizon), dtype=int) * -1
+        self.schedule = np.ones(
+            (self.num_items, self.time_horizon), dtype=int) * -1
         self.taken = np.zeros((self.num_items, self.time_horizon), dtype=int)
 
     def pull_arm(self) -> np.ndarray:
@@ -131,7 +131,8 @@ class CombinatorialUCBBidding:
         """
         if self.remaining_budget < self.num_items:
             # Budget depleted
-            self.last_chosen_price_indices = -1 * np.ones(self.num_items, dtype=int)
+            self.last_chosen_price_indices = -1 * \
+                np.ones(self.num_items, dtype=int)
             return self.last_chosen_price_indices
 
         # Exploration phase: ensure each arm is tried at least once
@@ -300,7 +301,7 @@ class CombinatorialUCBBidding:
         return np.argmax(masked_rewards, axis=1)
 
     def update(
-        self, rewards: np.ndarray, full_rewards: NDArray[np.float64] = None
+        self, rewards: np.ndarray, valuations: NDArray[np.float64] = None
     ) -> None:
         """
         Update agent statistics after a round.
@@ -326,10 +327,13 @@ class CombinatorialUCBBidding:
             # Update running averages using incremental formula: M_k = M_{k-1} + (x_k - M_{k-1}) / k
             pull_count = self.pull_counts[item_idx, price_idx]
 
-            reward_diff = rewards[item_idx] - self.average_rewards[item_idx, price_idx]
-            self.average_rewards[item_idx, price_idx] += reward_diff / pull_count
+            reward_diff = rewards[item_idx] - \
+                self.average_rewards[item_idx, price_idx]
+            self.average_rewards[item_idx,
+                                 price_idx] += reward_diff / pull_count
 
-            cost_diff = costs[item_idx] - self.average_costs[item_idx, price_idx]
+            cost_diff = costs[item_idx] - \
+                self.average_costs[item_idx, price_idx]
             self.average_costs[item_idx, price_idx] += cost_diff / pull_count
 
         assert np.all(c in (0, 1) for c in costs)
@@ -339,197 +343,153 @@ class CombinatorialUCBBidding:
 
 # Task 3
 class HedgeAgent:
-    """Hedge agent for online learning"""
-
     def __init__(self, K: int, learning_rate: float) -> None:
-        self.K: int = K
-        self.learning_rate: float = learning_rate
-        self.weights: np.ndarray = np.ones(K)
-        self.x_t: np.ndarray = np.ones(K) / K
-        self.a_t: Optional[int] = None
-        self.rng = np.random.default_rng()
-        self.t: int = 0
+        self.K = K
+        self.learning_rate = learning_rate
+        self.weights = np.ones(K)
 
     def pull_arm(self) -> int:
-        self.x_t = self.weights / np.sum(self.weights)
-        self.a_t = int(self.rng.choice(np.arange(self.K), p=self.x_t))
-        return int(self.a_t)
+        x_t = self.weights / np.sum(self.weights)
+        return int(np.random.choice(np.arange(self.K), p=x_t))
 
     def update(self, l_t: np.ndarray) -> None:
         self.weights *= np.exp(-self.learning_rate * l_t)
-        self.t += 1
 
 
 # Task 3
 class PrimalDualAgent(Agent):
     """Primal-Dual agent with Full-Feedback for non-stationary environments"""
 
-    # TODO: in the future maybe we need to add eta parameter to experiment
-    def __init__(self, prices: np.ndarray, T: int, B: float) -> None:
+    def __init__(self, prices: np.ndarray, time_horizon: int, budget: float, eta: float = None) -> None:
+        """
+        Initialize the primal-dual pricing agent.
+
+        Args:
+            prices: List of discrete price arrays (num_prices,)
+            time_horizon: Time horizon of the simulation
+            budget: Total initial budget
+            eta: Learning rate for dual variable update
+        """
         self.prices: np.ndarray = np.array(prices)
-        self.K: int = len(prices)
-        self.T: int = T
-        self.B: float = B
-        self.eta: float = 1.0 / np.sqrt(T)
-        self.rng = np.random.default_rng()
-        self.hedge: HedgeAgent = HedgeAgent(self.K, np.sqrt(np.log(self.K) / T))
-        self.rho: float = B / T
+        assert len(prices) > 1, "PrimalDualAgent requires at least 2 prices."
+        self.num_prices: int = len(prices)
+        self.time_horizon: int = time_horizon
+        assert budget > 0, "Budget must be positive."
+        self.budget: float = budget
+        self.eta: float = 1.0 / np.sqrt(time_horizon) if eta is None else eta
+        lr = np.sqrt(np.log(self.num_prices) / time_horizon)
+        self.hedge: HedgeAgent = HedgeAgent(
+            self.num_prices, lr
+        )
+        self.rho: float = budget / time_horizon
         self.lmbd: float = 1.0
         self.t: int = 0
-        self.pull_counts: np.ndarray = np.zeros(self.K, int)
-        self.last_arm: Optional[int] = None
-        # History tracking for analysis
-        self.lmbd_history: list[float] = []
-        self.hedge_weight_history: list[np.ndarray] = []
+        self.last_arm = -1
 
     def pull_arm(self) -> NDArray[np.int64]:
-        if self.B < 1:
-            self.last_arm = None
+        if self.budget < 1:
+            self.last_arm = -1
             return np.array([-1])
         self.last_arm = self.hedge.pull_arm()
         return np.array([self.last_arm])
 
-    # TODO: change the name from full_rewards to valuations
     def update(
-        self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None
+        self, rewards: NDArray[np.float64], valuations: NDArray[np.float64] = None
     ) -> None:
+        if self.last_arm == -1:
+            return
+
         assert rewards.shape == (1,)
-        assert full_rewards.shape == (1,)
-        v_t = full_rewards[0]
-        sale_mask: np.ndarray = (self.prices <= v_t).astype(float)
-        f_full: np.ndarray = self.prices * sale_mask
-        c_full: np.ndarray = sale_mask
+        assert valuations.shape == (1,)
+        v_t = valuations[0]
 
-        L: np.ndarray = f_full - self.lmbd * (c_full - self.rho)
-        f_max: float = self.prices.max()
-        L_up: float = f_max - self.lmbd * (0 - self.rho)
-        L_low: float = 0.0 - self.lmbd * (1 - self.rho)
+        sale_mask = (self.prices <= v_t).astype(float)
+        f_full = self.prices * sale_mask
 
-        rescaled: np.ndarray = (L - L_low) / (L_up - L_low + 1e-12)
-        losses: np.ndarray = 1.0 - rescaled
+        L = f_full - self.lmbd * (sale_mask - self.rho)
+        f_max = float(self.prices.max())
+        L_up = f_max - self.lmbd * (0 - self.rho)
+        L_low = 0.0 - self.lmbd * (1 - self.rho)
+
+        losses = 1.0 - (L - L_low) / (L_up - L_low + 1e-12)
         self.hedge.update(losses)
 
-        if self.last_arm is not None:
-            c_t: int = 1 if self.prices[self.last_arm] <= v_t else 0
-            f_t: float = self.prices[self.last_arm] * c_t
-            self.B -= c_t
-            self.pull_counts[self.last_arm] += 1
-        else:
-            c_t = 0
-            f_t = 0.0
+        c_t = 1 if rewards[0] > 0 else 0
+        self.budget -= c_t
 
-        # Update dual variable and record it
         self.lmbd = np.clip(
             self.lmbd - self.eta * (self.rho - c_t), a_min=0.0, a_max=1.0 / self.rho
         )
-        self.lmbd_history.append(self.lmbd)
-        # Record current hedge weights
-        self.hedge_weight_history.append(self.hedge.weights.copy())
 
 
 # Task 4
-class MultiItemDualPricingAgent(Agent):
+class MultiItemPrimalDualAgent(Agent):
     """Primal-Dual agent with Full-Feedback for multi-product pricing"""
 
-    def __init__(
-        self, prices: list[np.ndarray], T: int, B: float, n_products: int, eta: float
-    ) -> None:
-        # Assuming all products have the same price grid
-        self.prices: np.ndarray = prices
-        self.K: int = len(prices)
-        self.T: int = T
-        self.n_products: int = n_products
-        self.B: float = B
-        self.rho: float = B / (n_products * T)
-        self.eta: float = eta
-        self.rng = np.random.default_rng()
-        self.hedges: list[HedgeAgent] = [
-            HedgeAgent(self.K, np.sqrt(np.log(self.K) / T)) for _ in range(n_products)
+    def __init__(self, prices: NDArray[np.float64], time_horizon: int, budget: float, n_products: int, eta: float = None) -> None:
+        """
+        Initialize the multi-item dual pricing agent.
+        Args:
+            prices: List of discrete price arrays for each product (num_prices,)
+            time_horizon: Time horizon of the simulation
+            budget: Total initial budget
+            eta: Learning rate for dual variable update
+        """
+        self.prices = prices
+        assert len(
+            prices) > 1, "MultiItemPrimalDualAgent requires at least 2 prices."
+        self.num_prices = len(prices)
+        self.time_horizon = time_horizon
+        assert n_products > 0, "Number of products must be positive."
+        self.n_products = n_products
+        assert budget > 0, "Budget must be positive."
+        self.budget = budget
+        self.rho = budget / (n_products * time_horizon)
+        self.eta = eta if eta is not None else 1.0 / \
+            np.sqrt(time_horizon)
+        lr = np.sqrt(np.log(self.num_prices) / time_horizon)
+        self.hedges = [
+            HedgeAgent(self.num_prices, lr) for _ in range(n_products)
         ]
-        self.lmbd: float = 1.0
-        self.lmbd_history: list[float] = []
-        self.hedge_prob_history: list[list[np.ndarray]] = [
-            [] for _ in range(n_products)
-        ]
-
-        # Store last chosen arms to use in update
-        self.last_arms: Optional[NDArray[np.int64]] = None
+        self.lmbd = 1.0
+        self.last_arms = np.array([-1] * self.n_products, dtype=np.int64)
 
     def pull_arm(self) -> NDArray[np.int64]:
-        if self.B < 1:
+        if self.budget < 1:
             self.last_arms = np.array([-1] * self.n_products, dtype=np.int64)
             return self.last_arms
 
-        arms: list[int] = [hedge.pull_arm() for hedge in self.hedges]
+        arms = [hedge.pull_arm() for hedge in self.hedges]
         self.last_arms = np.array(arms, dtype=np.int64)
         return self.last_arms
 
     def update(
-        self, reward: NDArray[np.float64], full_rewards: NDArray[np.float64] = None
+        self, reward: NDArray[np.float64], valuations: NDArray[np.float64] = None
     ) -> None:
-        # Use the arms that were actually chosen in pull_arm(), not new ones!
-        if self.last_arms is None or np.all(self.last_arms == -1):
-            return  # Budget depleted, no update needed
+        if np.all(self.last_arms == -1):
+            return
 
-        arms = self.last_arms
-        total_revenue: float = 0.0
-        total_units_sold: int = 0
-        losses: list[np.ndarray] = []
-        p_max: float = self.prices.max()
-        L_up: float = p_max - self.lmbd * (0 - self.rho)
-        L_low: float = 0.0 - self.lmbd * (1 - self.rho)
-        norm_factor: float = L_up - L_low + 1e-12
+        total_units_sold: int = np.sum(reward > 0)
+        p_max = float(self.prices.max())
+        L_up = p_max - self.lmbd * (0 - self.rho)
+        L_low = 0.0 - self.lmbd * (1 - self.rho)
+        norm_factor = L_up - L_low + 1e-10
 
         for j in range(self.n_products):
-            arm: int = arms[j]
-            if arm == -1:  # Budget exhausted for this item
-                losses.append(np.zeros(self.K))
-                continue
+            would_sell = (self.prices <= valuations[j]).astype(float)
+            f_vec = self.prices * would_sell
+            L_vec = f_vec - self.lmbd * (would_sell - self.rho)
+            loss_vec = 1.0 - (L_vec - L_low) / norm_factor
+            loss_vec = np.clip(loss_vec, 0.0, 1.0)
+            self.hedges[j].update(loss_vec)
 
-            p_chosen: float = self.prices[arm]
-            # FIXED: Check if sale occurred based on reward > 0 (which means valuation >= price)
-            sale: int = 1 if reward[j] > 0 else 0
-            # Use actual reward received, not p_chosen * sale
-            f_val: float = reward[j]
-            total_revenue += f_val
-            total_units_sold += sale
-
-            # Full feedback update using valuations
-            if full_rewards is not None:
-                v_t = full_rewards  # (num_items, )
-                val_j: float = float(v_t[j])
-                would_sell: np.ndarray = (self.prices <= val_j).astype(float)
-                f_vec: np.ndarray = self.prices * would_sell
-                L_vec: np.ndarray = f_vec - self.lmbd * (would_sell - self.rho)
-                loss_vec: np.ndarray = 1.0 - (L_vec - L_low) / norm_factor
-                loss_vec = np.clip(loss_vec, 0.0, 1.0)  # Clip to valid range
-                losses.append(loss_vec)
-            else:
-                # Bandit feedback fallback
-                loss_vec = np.zeros(self.K)
-                if sale == 1:
-                    lagrangian = f_val - self.lmbd * (sale - self.rho)
-                    normalized_reward = (lagrangian - L_low) / norm_factor
-                    normalized_reward = np.clip(normalized_reward, 0.0, 1.0)
-                    loss_vec[arm] = 1.0 - normalized_reward
-                else:
-                    loss_vec[arm] = 1.0  # No reward, full loss
-                losses.append(loss_vec)
-
-        # Update hedge agents
-        for j in range(self.n_products):
-            self.hedges[j].update(losses[j])
-            prob_j = self.hedges[j].weights / np.sum(self.hedges[j].weights)
-            self.hedge_prob_history[j].append(prob_j.copy())
-
-        # Update budget and dual variable
-        self.B -= total_units_sold
-        self.lmbd = np.clip(
-            self.lmbd - self.eta * (self.rho * self.n_products - total_units_sold),
+        self.budget -= total_units_sold
+        self.lmbd = float(np.clip(
+            self.lmbd - self.eta *
+            (self.rho * self.n_products - total_units_sold),
             a_min=0.0,
             a_max=1 / self.rho if self.rho > 0 else 1.0,
-        )
-        self.lmbd_history.append(self.lmbd)
+        ))
 
 
 # Task 5
@@ -592,7 +552,8 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
         """
         if self.remaining_budget < self.num_items:
             # Budget depleted
-            self.last_chosen_price_indices = -1 * np.ones(self.num_items, dtype=int)
+            self.last_chosen_price_indices = -1 * \
+                np.ones(self.num_items, dtype=int)
             return self.last_chosen_price_indices
 
         # Exploration phase: ensure each arm is tried at least once
@@ -661,8 +622,10 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
                         np.log(self.current_round + 1) / n_observations
                     )
 
-                    reward_ucb[item_idx, price_idx] = mean_reward + confidence_term
-                    cost_lcb[item_idx, price_idx] = max(0, mean_cost - confidence_term)
+                    reward_ucb[item_idx, price_idx] = mean_reward + \
+                        confidence_term
+                    cost_lcb[item_idx, price_idx] = max(
+                        0, mean_cost - confidence_term)
 
         return reward_ucb, cost_lcb
 
@@ -814,7 +777,7 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
                     )
 
     def update(
-        self, rewards: np.ndarray, full_rewards: NDArray[np.float64] = None
+        self, rewards: np.ndarray, valuations: NDArray[np.float64] = None
     ) -> None:
         """
         Update sliding window statistics after a round.

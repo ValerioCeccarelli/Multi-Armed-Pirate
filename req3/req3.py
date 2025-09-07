@@ -91,7 +91,7 @@ def run_simulation(
             break  # Stop simulation if any item's budget is exhausted
 
         # Update agent with rewards
-        agent.update(rewards, full_rewards=valuations)
+        agent.update(rewards, valuations=valuations)
 
         total_played_arms[:, t] = price_indexes
 
@@ -216,8 +216,8 @@ def primal_dual_agent_builder(config: PrimalDualConfig) -> Agent:
     ), f"Expected PrimalDualAgentConfig, got {type(config)}"
     return PrimalDualAgent(
         prices=prices,
-        B=config.budget,
-        T=time_horizon,
+        budget=config.budget,
+        time_horizon=time_horizon,
     )
 
 

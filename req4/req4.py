@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from environments import Environment, NonStochasticSmoothChangeEnvironment
-from agents import Agent, MultiItemDualPricingAgent, CombinatorialUCBBidding, CombinatorialUCBBiddingSlidingWindow
+from agents import Agent, MultiItemPrimalDualAgent, CombinatorialUCBBidding, CombinatorialUCBBiddingSlidingWindow
 from baselines import FixedActionBaselineAgent
 from plotting import (
     plot_price_frequency_histograms,
@@ -82,7 +82,7 @@ def run_simulation(
             break  # Stop simulation if any item's budget is exhausted
 
         # Update agent with rewards
-        agent.update(rewards, full_rewards=valuations)
+        agent.update(rewards, valuations=valuations)
 
         total_played_arms[:, t] = price_indexes
 
@@ -171,11 +171,11 @@ def run_multiple_simulations(
 print("Task: Multiple items (3) with budget constraint")
 
 num_trials = 2
-time_horizon = 10_000
+time_horizon = 1_000
 prices = np.linspace(0.1, 1.0, 10)
 num_prices = len(prices)
 num_items = 3
-budget = 8_000
+budget = 800
 
 primal_dual_eta = 1 / np.sqrt(time_horizon)
 
@@ -205,10 +205,10 @@ def combinatorial_agent_builder(env: Environment) -> Agent:
 
 
 def primal_dual_agent_builder(env: Environment) -> Agent:
-    return MultiItemDualPricingAgent(
+    return MultiItemPrimalDualAgent(
         prices=prices,
-        B=budget,
-        T=time_horizon,
+        budget=budget,
+        time_horizon=time_horizon,
         n_products=num_items,
         eta=primal_dual_eta,
     )
@@ -317,35 +317,35 @@ plot_budget_evolution(
 fig.savefig("req4_primaldual_vs_ucbsliding_cumregret_budgetevolution.png")
 
 # Conversion rates as a separate plot with dual subplots
-plot_conversion_rates(
-    valuations=results.valuations,
-    agents_played_arms=results.agents_played_arms[0][np.newaxis, ...],
-    baseline_played_arms=results.baseline_played_arms,
-    prices=prices,
-    agents_names=["Primal Dual"],
-    save_plot=True,
-    save_path="req4_primaldual_conversion_rates.png",
-)
+# plot_conversion_rates(
+#     valuations=results.valuations,
+#     agents_played_arms=results.agents_played_arms[0][np.newaxis, ...],
+#     baseline_played_arms=results.baseline_played_arms,
+#     prices=prices,
+#     agents_names=["Primal Dual"],
+#     save_plot=True,
+#     save_path="req4_primaldual_conversion_rates.png",
+# )
 
-plot_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.agents_played_arms,
-    prices=prices,
-    agents_names=["Primal Dual", "Combinatorial UCB", "UCB Sliding Window"],
-    save_plot=True,
-    save_path_prefix="req4_primaldual_price_histograms"
-)
+# plot_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.agents_played_arms,
+#     prices=prices,
+#     agents_names=["Primal Dual", "Combinatorial UCB", "UCB Sliding Window"],
+#     save_plot=True,
+#     save_path_prefix="req4_primaldual_price_histograms"
+# )
 
 plt.show()
 
 # Genera e salva animazione per l'agente MultiProduct Primal Dual
-print("Generando animazione per l'agente MultiProduct Primal Dual...")
-plot_animated_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.agents_played_arms[0][np.newaxis, ...],
-    prices=prices,
-    agents_names=["Primal Dual"],
-    save_path_prefix="req4_animation_primal_dual"
-)
+# print("Generando animazione per l'agente MultiProduct Primal Dual...")
+# plot_animated_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.agents_played_arms[0][np.newaxis, ...],
+#     prices=prices,
+#     agents_names=["Primal Dual"],
+#     save_path_prefix="req4_animation_primal_dual"
+# )
 
-plt.show()
+# plt.show()

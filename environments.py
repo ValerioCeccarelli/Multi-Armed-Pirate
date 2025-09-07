@@ -47,7 +47,6 @@ class StochasticEnvironment(Environment):
         """
         self._num_items = len(distribution_functions)
         self._num_rounds = num_rounds
-        self._rng = np.random.default_rng(seed)
         self._valuations = np.array(
             [
                 [distribution_func() for _ in range(num_rounds)]
@@ -119,7 +118,6 @@ class NonStochasticSmoothChangeEnvironment(Environment):
         """
         self._num_items = len(distribution_functions)
         self._num_rounds = num_rounds
-        self._rng = np.random.default_rng(seed)
         self._valuations = np.array(
             [
                 [distribution_func(t) for t in range(num_rounds)]
@@ -153,10 +151,8 @@ class NonStochasticSmoothChangeEnvironment(Environment):
         mu0, A, f = 0.5, 0.1, 100
         sigma0, A_sigma, phi_sigma, rho0 = 0.1, 0.1, 0, 0.6
 
-        rng = np.random.default_rng(0)
         T = time_horizon
         m = num_items
-        V: np.ndarray = np.empty((T, m))
         R: np.ndarray = np.eye(m) + (1 - np.eye(m)) * rho0
 
         def distribution(t: int) -> float:
@@ -165,9 +161,9 @@ class NonStochasticSmoothChangeEnvironment(Environment):
                 np.sin(2 * np.pi * f * t / T + phi_sigma)
             Sigma: np.ndarray = np.diag(
                 [sigma_t] * m) @ R @ np.diag([sigma_t] * m)
-            sample: np.ndarray = rng.multivariate_normal([mu_t] * m, Sigma)
-            # print(sample.shape, sample)
-            # raise NotImplementedError("Check the shape of the sample")
+            sample: np.ndarray = np.random.multivariate_normal(
+                [mu_t] * m, Sigma)
+
             return np.clip(sample[0], 0, 1)
 
         return distribution
@@ -227,7 +223,6 @@ class NonStochasticAbruptChangeEnvironment(StochasticEnvironment):
         ), "All items must have the same number of intervals"
 
         self._num_rounds = num_rounds
-        self._rng = np.random.default_rng(seed)
 
         self._valuations = np.zeros(
             (self._num_items, self._num_rounds), dtype=np.float64
