@@ -133,6 +133,39 @@ class NonStochasticSmoothChangeEnvironment(Environment):
         return self._num_items
 
 
+class NonStochasticAbruptChangeEnvironment(StochasticEnvironment):
+    def __init__(self, distribution_functions: list[list[Callable[[], float]]], interval_length: int, num_rounds: int, seed: int = 42):
+        """
+        Non-stationary environment where valuations change abruptly at fixed intervals.
+
+        Args:
+            distribution_functions (list[list[Callable[[], float]]]): List of lists of functions to generate random valuations for each interval (num_items, num_intervals)
+            interval_length (int): Length of each interval before a change occurs.
+            num_rounds (int): Total number of rounds.
+            seed (int): Random seed for reproducibility.
+        """
+        self._num_items = len(distribution_functions)
+        assert self._num_items > 0, "There must be at least one item"
+        assert all(len(
+            funcs) > 0 for funcs in distribution_functions), "Each item must have at least one interval"
+        self._num_intervals = len(distribution_functions[0])
+        assert all(len(
+            funcs) == self._num_intervals for funcs in distribution_functions), "All items must have the same number of intervals"
+        self._interval_length = interval_length
+        assert interval_length > 0, "Interval length must be positive"
+        self._num_rounds = num_rounds
+        self._rng = np.random.default_rng(seed)
+
+        self._valuations = np.zeros(
+            (self._num_items, self._num_rounds), dtype=np.float64)
+
+        for t in range(num_rounds):
+            interval_index = min(t // interval_length, self._num_intervals - 1)
+            for item_index in range(self._num_items):
+                self._valuations[item_index,
+                                 t] = distribution_functions[item_index][interval_index]()
+
+
 if __name__ == "__main__":
     print("Stochastic Environment Test...")
 
@@ -158,3 +191,44 @@ if __name__ == "__main__":
     # plt.show()
 
     print("Stochastic Environment Test Passed!")
+
+    print("Non-Stochastic Smooth Change Environment Test...")
+    print("Non-Stochastic Smooth Change Environment Test Passed!")
+
+    print("Non-Stochastic Abrupt Change Environment Test ...")
+
+    env = NonStochasticAbruptChangeEnvironment(
+        distribution_functions=[
+            [
+                NonStochasticAbruptChangeEnvironment.uniform_distribution(
+                    low=0.0, high=0.3),
+                NonStochasticAbruptChangeEnvironment.uniform_distribution(
+                    low=0.3, high=0.6),
+                NonStochasticAbruptChangeEnvironment.uniform_distribution(
+                    low=0.6, high=1.0),
+            ],
+            [
+                NonStochasticAbruptChangeEnvironment.uniform_distribution(
+                    low=0.0, high=0.3),
+                NonStochasticAbruptChangeEnvironment.uniform_distribution(
+                    low=0.3, high=0.6),
+                NonStochasticAbruptChangeEnvironment.uniform_distribution(
+                    low=0.6, high=1.0),
+            ],
+            [
+                NonStochasticAbruptChangeEnvironment.uniform_distribution(
+                    low=0.0, high=0.3),
+                NonStochasticAbruptChangeEnvironment.uniform_distribution(
+                    low=0.3, high=0.6),
+                NonStochasticAbruptChangeEnvironment.uniform_distribution(
+                    low=0.6, high=1.0),
+            ],
+        ],
+        interval_length=50,
+        num_rounds=200,
+        seed=42
+    )
+
+    assert env.valuations.shape == (
+        3, 200), f"Expected shape (3, 200), got {env.valuations.shape}"
+    assert env.time_horizon == 200, f"Expected time_horizon 200, got {env.time_horizon}"
