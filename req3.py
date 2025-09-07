@@ -1,19 +1,31 @@
 from dataclasses import dataclass
 from typing import Callable, TypeVar
-from numpy.typing import NDArray
+
 import numpy as np
 from matplotlib import pyplot as plt
+from numpy.typing import NDArray
 
-from environments import Environment, StochasticEnvironment, NonStochasticSmoothChangeEnvironment
-from agents import Agent, PrimalDualAgent, BanditFeedbackPrimalDual
-from baselines import FixedActionBaselineAgent, OptimalDistributionSingleItemBaselineAgent
-from plotting import (
-    plot_price_frequency_histograms,
-    plot_cumulative_regret,
-    plot_budget_evolution,
-    plot_animated_price_frequency_histograms,
+from agents import (
+    Agent,
+    BanditFeedbackPrimalDual,
+    FFPrimalDualPricingAgent,
+    PrimalDualAgent,
 )
-
+from baselines import (
+    FixedActionBaselineAgent,
+    OptimalDistributionSingleItemBaselineAgent,
+)
+from environments import (
+    Environment,
+    NonStochasticSmoothChangeEnvironment,
+    StochasticEnvironment,
+)
+from plotting import (
+    plot_animated_price_frequency_histograms,
+    plot_budget_evolution,
+    plot_cumulative_regret,
+    plot_price_frequency_histograms,
+)
 
 # ---- Core simulation helpers (from req1.py) ----
 
@@ -84,7 +96,7 @@ def run_simulation(
             break  # Stop simulation if any item's budget is exhausted
 
         # Update agent with rewards
-        agent.update(rewards)
+        agent.update(rewards, full_rewards=valuations)
 
         total_played_arms[:, t] = price_indexes
 
@@ -140,8 +152,7 @@ def run_multiple_simulations(
     num_items = temp_env.num_items
     time_horizon = temp_env.time_horizon
 
-    valuations = np.zeros(
-        (num_trials, num_items, time_horizon), dtype=np.float64)
+    valuations = np.zeros((num_trials, num_items, time_horizon), dtype=np.float64)
 
     agent_played_arms = np.full(
         (num_trials, num_items, time_horizon), -1, dtype=np.int64
@@ -194,25 +205,26 @@ def env_builder() -> Environment:
     return NonStochasticSmoothChangeEnvironment(
         distribution_functions=[
             NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
-                time_horizon, 50),
+                time_horizon, 50
+            ),
         ],
         num_rounds=time_horizon,
     )
 
 
 @dataclass
-class PrimalDualAgentConfig:
+class FullFeedbackPrimalDualConfig:
     num_items: int
     num_prices: int
     budget: int
     alpha: float = 1.0
 
 
-def combinatorial_agent_builder(config: PrimalDualAgentConfig) -> Agent:
+def combinatorial_agent_builder(config: FullFeedbackPrimalDualConfig) -> Agent:
     assert isinstance(
-        config, PrimalDualAgentConfig
+        config, FullFeedbackPrimalDualConfig
     ), f"Expected PrimalDualAgentConfig, got {type(config)}"
-    return BanditFeedbackPrimalDual(
+    return FFPrimalDualPricingAgent(
         prices=prices,
         B=config.budget,
         T=time_horizon,
@@ -242,7 +254,7 @@ results = run_multiple_simulations(
     agent_builder=combinatorial_agent_builder,
     baseline_builder=baseline_builder,
     num_trials=num_trials,
-    agent_config=PrimalDualAgentConfig(
+    agent_config=FullFeedbackPrimalDualConfig(
         num_items=num_items, num_prices=num_prices, budget=budget, alpha=0.01
     ),
     baseline_config=BaselineAgentConfig(budget=budget),
@@ -256,8 +268,8 @@ plot_cumulative_regret(
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
-    agents_names=["Combinatorial UCB"],
-    title="Cumulative Regret: Combinatorial UCB vs Fixed Baseline",
+    agents_names=["FFPrimalDualPricingAgent"],
+    title="Cumulative Regret: FFPrimalDualPricingAgent vs OptimalDistributionSingleItemBaselineAgent",
     ax=axes[0],
 )
 
@@ -265,7 +277,7 @@ plot_budget_evolution(
     valuations=results.valuations,
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["Combinatorial UCB"],
+    agents_names=["FFPrimalDualPricingAgent"],
     initial_budget=budget,
     ax=axes[1],
 )
@@ -274,23 +286,23 @@ plot_price_frequency_histograms(
     valuations=results.valuations,
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["Combinatorial UCB"],
+    agents_names=["FFPrimalDualPricingAgent"],
 )
 
 plot_price_frequency_histograms(
     valuations=results.valuations,
     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["Baseline Agent"],
+    agents_names=["OptimalDistributionSingleItemBaselineAgent"],
 )
 
 # Genera e salva animazione per l'agente Primal Dual
-print("Generando animazione per l'agente Primal Dual...")
-plot_animated_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-    prices=prices,
-    agents_names=["Primal Dual"],
-)
+# print("Generando animazione per l'agente Primal Dual...")
+# plot_animated_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+#     prices=prices,
+#     agents_names=["FFPrimalDualPricingAgent"],
+# )
 
 plt.show()
