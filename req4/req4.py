@@ -207,7 +207,7 @@ def env_builder() -> Environment:
                 time_horizon, 50
             ),
             NonStochasticSmoothChangeEnvironment.gaussian_distribution(
-                mean=0.55, std=0.1),
+                mean=0.55, std=0.1, freq=1),
         ],
         num_rounds=time_horizon,
     )
