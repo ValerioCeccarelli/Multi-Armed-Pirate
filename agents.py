@@ -119,8 +119,7 @@ class CombinatorialUCBBidding:
         self.current_round = 0
         self.last_chosen_price_indices = np.zeros(self.num_items, dtype=int)
 
-        self.schedule = np.ones(
-            (self.num_items, self.time_horizon), dtype=int) * -1
+        self.schedule = np.ones((self.num_items, self.time_horizon), dtype=int) * -1
         self.taken = np.zeros((self.num_items, self.time_horizon), dtype=int)
 
     def pull_arm(self) -> np.ndarray:
@@ -132,8 +131,7 @@ class CombinatorialUCBBidding:
         """
         if self.remaining_budget < self.num_items:
             # Budget depleted
-            self.last_chosen_price_indices = -1 * \
-                np.ones(self.num_items, dtype=int)
+            self.last_chosen_price_indices = -1 * np.ones(self.num_items, dtype=int)
             return self.last_chosen_price_indices
 
         # Exploration phase: ensure each arm is tried at least once
@@ -328,13 +326,10 @@ class CombinatorialUCBBidding:
             # Update running averages using incremental formula: M_k = M_{k-1} + (x_k - M_{k-1}) / k
             pull_count = self.pull_counts[item_idx, price_idx]
 
-            reward_diff = rewards[item_idx] - \
-                self.average_rewards[item_idx, price_idx]
-            self.average_rewards[item_idx,
-                                 price_idx] += reward_diff / pull_count
+            reward_diff = rewards[item_idx] - self.average_rewards[item_idx, price_idx]
+            self.average_rewards[item_idx, price_idx] += reward_diff / pull_count
 
-            cost_diff = costs[item_idx] - \
-                self.average_costs[item_idx, price_idx]
+            cost_diff = costs[item_idx] - self.average_costs[item_idx, price_idx]
             self.average_costs[item_idx, price_idx] += cost_diff / pull_count
 
         assert np.all(c in (0, 1) for c in costs)
@@ -377,8 +372,7 @@ class PrimalDualAgent(Agent):
         self.B: float = B
         self.eta: float = 1.0 / np.sqrt(T)
         self.rng = np.random.default_rng()
-        self.hedge: HedgeAgent = HedgeAgent(
-            self.K, np.sqrt(np.log(self.K) / T))
+        self.hedge: HedgeAgent = HedgeAgent(self.K, np.sqrt(np.log(self.K) / T))
         self.rho: float = B / T
         self.lmbd: float = 1.0
         self.t: int = 0
@@ -437,7 +431,9 @@ class PrimalDualAgent(Agent):
 class MultiItemDualPricingAgent(Agent):
     """Primal-Dual agent with Full-Feedback for multi-product pricing"""
 
-    def __init__(self, prices: list[np.ndarray], T: int, B: float, n_products: int, eta: float) -> None:
+    def __init__(
+        self, prices: list[np.ndarray], T: int, B: float, n_products: int, eta: float
+    ) -> None:
         # Assuming all products have the same price grid
         self.prices: np.ndarray = prices
         self.K: int = len(prices)
@@ -448,13 +444,13 @@ class MultiItemDualPricingAgent(Agent):
         self.eta: float = eta
         self.rng = np.random.default_rng()
         self.hedges: list[HedgeAgent] = [
-            HedgeAgent(self.K, np.sqrt(np.log(self.K) / T))
-            for _ in range(n_products)
+            HedgeAgent(self.K, np.sqrt(np.log(self.K) / T)) for _ in range(n_products)
         ]
         self.lmbd: float = 1.0
         self.lmbd_history: list[float] = []
         self.hedge_prob_history: list[list[np.ndarray]] = [
-            [] for _ in range(n_products)]
+            [] for _ in range(n_products)
+        ]
 
         # Store last chosen arms to use in update
         self.last_arms: Optional[NDArray[np.int64]] = None
@@ -468,7 +464,9 @@ class MultiItemDualPricingAgent(Agent):
         self.last_arms = np.array(arms, dtype=np.int64)
         return self.last_arms
 
-    def update(self, reward: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
+    def update(
+        self, reward: NDArray[np.float64], full_rewards: NDArray[np.float64] = None
+    ) -> None:
         # Use the arms that were actually chosen in pull_arm(), not new ones!
         if self.last_arms is None or np.all(self.last_arms == -1):
             return  # Budget depleted, no update needed
@@ -526,8 +524,11 @@ class MultiItemDualPricingAgent(Agent):
 
         # Update budget and dual variable
         self.B -= total_units_sold
-        self.lmbd = np.clip(self.lmbd - self.eta * (self.rho * self.n_products - total_units_sold),
-                            a_min=0.0, a_max=1 / self.rho if self.rho > 0 else 1.0)
+        self.lmbd = np.clip(
+            self.lmbd - self.eta * (self.rho * self.n_products - total_units_sold),
+            a_min=0.0,
+            a_max=1 / self.rho if self.rho > 0 else 1.0,
+        )
         self.lmbd_history.append(self.lmbd)
 
 
@@ -558,7 +559,7 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
             price_set: Discrete set of possible prices for all items
             budget: Total initial budget
             time_horizon: Time horizon of the simulation
-            window_size: Size of the sliding window (number of recent observations to consider)
+            window_size: Size of the sliding window (number of recent time steps to consider)
             alpha: UCB/LCB exploration parameter
         """
         self.num_items = int(num_items)
@@ -569,13 +570,14 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
         self.window_size = window_size
         self.exploration_param = alpha
 
-        # Sliding window data storage: deques for each (item, price) pair
-        # Each deque contains tuples of (reward, cost) observations
-        self.sliding_windows = {}
-        for item_idx in range(self.num_items):
-            for price_idx in range(self.num_prices):
-                self.sliding_windows[(item_idx, price_idx)] = deque(
-                    maxlen=window_size)
+        # Global sliding window: track last window_size rounds
+        # Each element is a tuple of (chosen_price_indices, rewards, costs)
+        self.action_history = deque(maxlen=window_size)
+
+        # Current statistics based on sliding window
+        self.pull_counts = np.zeros((self.num_items, self.num_prices))
+        self.average_rewards = np.zeros((self.num_items, self.num_prices))
+        self.average_costs = np.zeros((self.num_items, self.num_prices))
 
         self.remaining_budget = budget
         self.current_round = 0
@@ -590,8 +592,7 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
         """
         if self.remaining_budget < self.num_items:
             # Budget depleted
-            self.last_chosen_price_indices = -1 * \
-                np.ones(self.num_items, dtype=int)
+            self.last_chosen_price_indices = -1 * np.ones(self.num_items, dtype=int)
             return self.last_chosen_price_indices
 
         # Exploration phase: ensure each arm is tried at least once
@@ -622,7 +623,7 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
         """
         for item_idx in range(self.num_items):
             for price_idx in range(self.num_prices):
-                if len(self.sliding_windows[(item_idx, price_idx)]) == 0:
+                if self.pull_counts[item_idx, price_idx] == 0:
                     # Explore arm (item_idx, price_idx)
                     chosen_indices = np.zeros(self.num_items, dtype=int)
                     chosen_indices[item_idx] = price_idx
@@ -643,8 +644,7 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
 
         for item_idx in range(self.num_items):
             for price_idx in range(self.num_prices):
-                window = self.sliding_windows[(item_idx, price_idx)]
-                n_observations = len(window)
+                n_observations = self.pull_counts[item_idx, price_idx]
 
                 if n_observations == 0:
                     # No observations yet, use optimistic initialization
@@ -652,22 +652,17 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
                     reward_ucb[item_idx, price_idx] = 1.0
                     cost_lcb[item_idx, price_idx] = 0.0  # Min possible cost
                 else:
-                    # Calculate means from sliding window
-                    rewards = [obs[0] for obs in window]
-                    costs = [obs[1] for obs in window]
+                    # Use current averages calculated from sliding window
+                    mean_reward = self.average_rewards[item_idx, price_idx]
+                    mean_cost = self.average_costs[item_idx, price_idx]
 
-                    mean_reward = np.mean(rewards)
-                    mean_cost = np.mean(costs)
-
-                    # Confidence term based on window size
+                    # Confidence term based on number of observations in window
                     confidence_term = self.exploration_param * np.sqrt(
                         np.log(self.current_round + 1) / n_observations
                     )
 
-                    reward_ucb[item_idx, price_idx] = mean_reward + \
-                        confidence_term
-                    cost_lcb[item_idx, price_idx] = max(
-                        0, mean_cost - confidence_term)
+                    reward_ucb[item_idx, price_idx] = mean_reward + confidence_term
+                    cost_lcb[item_idx, price_idx] = max(0, mean_cost - confidence_term)
 
         return reward_ucb, cost_lcb
 
@@ -784,6 +779,40 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
         masked_rewards = np.where(feasible_mask, reward_ucb, -np.inf)
         return np.argmax(masked_rewards, axis=1)
 
+    def _recalculate_statistics_from_window(self):
+        """
+        Recalculate pull counts and averages from the current sliding window.
+        """
+        # Reset statistics
+        self.pull_counts = np.zeros((self.num_items, self.num_prices))
+        self.average_rewards = np.zeros((self.num_items, self.num_prices))
+        self.average_costs = np.zeros((self.num_items, self.num_prices))
+
+        # Accumulate statistics from the sliding window
+        reward_sums = np.zeros((self.num_items, self.num_prices))
+        cost_sums = np.zeros((self.num_items, self.num_prices))
+
+        for chosen_price_indices, rewards, costs in self.action_history:
+            for item_idx in range(self.num_items):
+                price_idx = chosen_price_indices[item_idx]
+
+                if price_idx >= 0:  # Valid price was chosen
+                    self.pull_counts[item_idx, price_idx] += 1
+                    reward_sums[item_idx, price_idx] += rewards[item_idx]
+                    cost_sums[item_idx, price_idx] += costs[item_idx]
+
+        # Calculate averages (avoiding division by zero)
+        for item_idx in range(self.num_items):
+            for price_idx in range(self.num_prices):
+                count = self.pull_counts[item_idx, price_idx]
+                if count > 0:
+                    self.average_rewards[item_idx, price_idx] = (
+                        reward_sums[item_idx, price_idx] / count
+                    )
+                    self.average_costs[item_idx, price_idx] = (
+                        cost_sums[item_idx, price_idx] / count
+                    )
+
     def update(
         self, rewards: np.ndarray, full_rewards: NDArray[np.float64] = None
     ) -> None:
@@ -796,47 +825,16 @@ class CombinatorialUCBBiddingSlidingWindow(Agent):
         chosen_price_indices = self.last_chosen_price_indices
         costs = (rewards > 0).astype(int)
 
-        # Update sliding windows for each item
-        for item_idx in range(self.num_items):
-            price_idx = chosen_price_indices[item_idx]
+        # Add current round to action history
+        # The deque will automatically remove the oldest round if window is full
+        self.action_history.append(
+            (chosen_price_indices.copy(), rewards.copy(), costs.copy())
+        )
 
-            if price_idx >= 0:  # Only update if a valid price was chosen
-                # Add new observation to the sliding window
-                # The deque will automatically remove the oldest observation if full
-                observation = (rewards[item_idx], costs[item_idx])
-                self.sliding_windows[(item_idx, price_idx)].append(observation)
+        # Recalculate statistics from the current sliding window
+        self._recalculate_statistics_from_window()
 
         # Update budget and round counter
         assert np.all(c in (0, 1) for c in costs)
         self.remaining_budget -= np.sum(costs)
         self.current_round += 1
-
-    def get_window_statistics(self) -> dict:
-        """
-        Get current statistics from all sliding windows (for debugging/analysis).
-
-
-        Returns:
-            Dictionary with statistics for each (item, price) pair
-        """
-        stats = {}
-        for item_idx in range(self.num_items):
-            for price_idx in range(self.num_prices):
-                window = self.sliding_windows[(item_idx, price_idx)]
-                if len(window) > 0:
-                    rewards = [obs[0] for obs in window]
-                    costs = [obs[1] for obs in window]
-                    stats[(item_idx, price_idx)] = {
-                        "count": len(window),
-                        "mean_reward": np.mean(rewards),
-                        "mean_cost": np.mean(costs),
-                        "recent_observations": list(window),
-                    }
-                else:
-                    stats[(item_idx, price_idx)] = {
-                        "count": 0,
-                        "mean_reward": 0.0,
-                        "mean_cost": 0.0,
-                        "recent_observations": [],
-                    }
-        return stats
