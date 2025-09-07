@@ -1,5 +1,3 @@
-
-
 from abc import ABC, abstractmethod
 from typing import Callable
 
@@ -33,7 +31,12 @@ class Environment(ABC):
 
 
 class StochasticEnvironment(Environment):
-    def __init__(self, distribution_functions: list[Callable[[], float]], num_rounds: int, seed: int = 42):
+    def __init__(
+        self,
+        distribution_functions: list[Callable[[], float]],
+        num_rounds: int,
+        seed: int = 42,
+    ):
         """
         Stochastic environment where valuations are drawn from a specified distribution.
 
@@ -46,29 +49,41 @@ class StochasticEnvironment(Environment):
         self._num_rounds = num_rounds
         self._rng = np.random.default_rng(seed)
         self._valuations = np.array(
-            [[distribution_func() for _ in range(num_rounds)]
-             for distribution_func in distribution_functions]
+            [
+                [distribution_func() for _ in range(num_rounds)]
+                for distribution_func in distribution_functions
+            ]
         ).astype(np.float64)
 
     @classmethod
-    def gaussian_distribution(cls, mean: float = 0.5, std: float = 0.1) -> Callable[[], float]:
+    def gaussian_distribution(
+        cls, mean: float = 0.5, std: float = 0.1
+    ) -> Callable[[], float]:
         """Generate a Gaussian distribution function."""
+
         def distribution():
             return np.random.normal(loc=mean, scale=std)
+
         return distribution
 
     @classmethod
     def beta_distribution(cls, a: float = 2.0, b: float = 5.0) -> Callable[[], float]:
         """Generate a Beta distribution function."""
+
         def distribution():
             return np.random.beta(a=a, b=b)
+
         return distribution
 
     @classmethod
-    def uniform_distribution(cls, low: float = 0.0, high: float = 1.0) -> Callable[[], float]:
+    def uniform_distribution(
+        cls, low: float = 0.0, high: float = 1.0
+    ) -> Callable[[], float]:
         """Generate a Uniform distribution function."""
+
         def distribution():
             return np.random.uniform(low=low, high=high)
+
         return distribution
 
     def round(self, round: int) -> NDArray[np.float64]:
@@ -88,7 +103,12 @@ class StochasticEnvironment(Environment):
 
 
 class NonStochasticSmoothChangeEnvironment(Environment):
-    def __init__(self, distribution_functions: list[Callable[[int], float]], num_rounds: int, seed: int = 62):
+    def __init__(
+        self,
+        distribution_functions: list[Callable[[int], float]],
+        num_rounds: int,
+        seed: int = 62,
+    ):
         """
         Non-stationary environment where valuations change smoothly over time.
 
@@ -101,24 +121,30 @@ class NonStochasticSmoothChangeEnvironment(Environment):
         self._num_rounds = num_rounds
         self._rng = np.random.default_rng(seed)
         self._valuations = np.array(
-            [[distribution_func(t) for t in range(num_rounds)]
-             for distribution_func in distribution_functions]
+            [
+                [distribution_func(t) for t in range(num_rounds)]
+                for distribution_func in distribution_functions
+            ]
         ).astype(np.float64)
 
     @classmethod
-    def generate_beta_valuations(cls, time_horizon: int, freq: int) -> Callable[[int], float]:
+    def generate_beta_valuations(
+        cls, time_horizon: int, freq: int
+    ) -> Callable[[int], float]:
         """Generate Beta valuations with oscillating parameters"""
+
         def distribution(t: int) -> float:
             # Oscillating Alpha and Beta parameters
-            alpha_t = 1 + 4 * \
-                (0.5 + 0.5 * np.sin(freq * np.pi * t / time_horizon))
-            beta_t = 1 + 4 * \
-                (0.5 + 0.5 * np.cos(freq * np.pi * t / time_horizon))
+            alpha_t = 1 + 4 * (0.5 + 0.5 * np.sin(freq * np.pi * t / time_horizon))
+            beta_t = 1 + 4 * (0.5 + 0.5 * np.cos(freq * np.pi * t / time_horizon))
             return np.random.beta(alpha_t, beta_t)
+
         return distribution
 
     @classmethod
-    def generate_simple_tv(cls, time_horizon: int, num_items: int) -> Callable[[int], float]:
+    def generate_simple_tv(
+        cls, time_horizon: int, num_items: int
+    ) -> Callable[[int], float]:
         """Generate simple time-varying valuations"""
 
         phi = 0.0
@@ -133,10 +159,8 @@ class NonStochasticSmoothChangeEnvironment(Environment):
 
         def distribution(t: int) -> float:
             mu_t = mu0 + A * np.sin(2 * np.pi * f * t / T + phi)
-            sigma_t = sigma0 + A_sigma * \
-                np.sin(2 * np.pi * f * t / T + phi_sigma)
-            Sigma: np.ndarray = np.diag(
-                [sigma_t] * m) @ R @ np.diag([sigma_t] * m)
+            sigma_t = sigma0 + A_sigma * np.sin(2 * np.pi * f * t / T + phi_sigma)
+            Sigma: np.ndarray = np.diag([sigma_t] * m) @ R @ np.diag([sigma_t] * m)
             sample: np.ndarray = rng.multivariate_normal([mu_t] * m, Sigma)
             # print(sample.shape, sample)
             # raise NotImplementedError("Check the shape of the sample")
@@ -145,10 +169,16 @@ class NonStochasticSmoothChangeEnvironment(Environment):
         return distribution
 
     @classmethod
-    def gaussian_distribution(cls, mean: float = 0.5, std: float = 0.1) -> Callable[[int], float]:
+    def gaussian_distribution(
+        cls, mean: float = 0.5, std: float = 0.1, frequency: float = 100
+    ) -> Callable[[int], float]:
         """Generate a Gaussian distribution function that oscillates."""
+
         def distribution(t: int) -> float:
-            return np.random.normal(loc=mean + 0.1 * np.sin(2 * np.pi * t / 100), scale=std)
+            return np.random.normal(
+                loc=mean + 0.1 * np.sin(2 * np.pi * t / frequency), scale=std
+            )
+
         return distribution
 
     def round(self, round: int) -> NDArray[np.float64]:
@@ -168,7 +198,12 @@ class NonStochasticSmoothChangeEnvironment(Environment):
 
 
 class NonStochasticAbruptChangeEnvironment(StochasticEnvironment):
-    def __init__(self, distribution_functions: list[list[Callable[[], float]]], num_rounds: int, seed: int = 42):
+    def __init__(
+        self,
+        distribution_functions: list[list[Callable[[], float]]],
+        num_rounds: int,
+        seed: int = 42,
+    ):
         """
         Non-stationary environment where valuations change abruptly at fixed intervals.
 
@@ -179,27 +214,32 @@ class NonStochasticAbruptChangeEnvironment(StochasticEnvironment):
         """
         self._num_items = len(distribution_functions)
         assert self._num_items > 0, "There must be at least one item"
-        assert all(len(
-            funcs) > 0 for funcs in distribution_functions), "Each item must have at least one interval"
+        assert all(
+            len(funcs) > 0 for funcs in distribution_functions
+        ), "Each item must have at least one interval"
         self._num_intervals = len(distribution_functions[0])
-        assert all(len(
-            funcs) == self._num_intervals for funcs in distribution_functions), "All items must have the same number of intervals"
+        assert all(
+            len(funcs) == self._num_intervals for funcs in distribution_functions
+        ), "All items must have the same number of intervals"
 
         self._num_rounds = num_rounds
         self._rng = np.random.default_rng(seed)
 
         self._valuations = np.zeros(
-            (self._num_items, self._num_rounds), dtype=np.float64)
+            (self._num_items, self._num_rounds), dtype=np.float64
+        )
 
-        assert num_rounds % self._num_intervals == 0, "num_rounds must be divisible by num_intervals"
+        assert (
+            num_rounds % self._num_intervals == 0
+        ), "num_rounds must be divisible by num_intervals"
         self._interval_length = num_rounds // self._num_intervals
 
         for t in range(num_rounds):
-            interval_index = min(t // self._interval_length,
-                                 self._num_intervals - 1)
+            interval_index = min(t // self._interval_length, self._num_intervals - 1)
             for item_index in range(self._num_items):
-                self._valuations[item_index,
-                                 t] = distribution_functions[item_index][interval_index]()
+                self._valuations[item_index, t] = distribution_functions[item_index][
+                    interval_index
+                ]()
 
 
 if __name__ == "__main__":
@@ -209,10 +249,10 @@ if __name__ == "__main__":
         distribution_functions=[
             StochasticEnvironment.gaussian_distribution(),
             StochasticEnvironment.gaussian_distribution(),
-            StochasticEnvironment.gaussian_distribution()
+            StochasticEnvironment.gaussian_distribution(),
         ],
         num_rounds=100,
-        seed=42
+        seed=42,
     )
 
     assert env.valuations.shape == (3, 100)
@@ -237,34 +277,45 @@ if __name__ == "__main__":
         distribution_functions=[
             [
                 NonStochasticAbruptChangeEnvironment.uniform_distribution(
-                    low=0.0, high=0.3),
+                    low=0.0, high=0.3
+                ),
                 NonStochasticAbruptChangeEnvironment.uniform_distribution(
-                    low=0.3, high=0.6),
+                    low=0.3, high=0.6
+                ),
                 NonStochasticAbruptChangeEnvironment.uniform_distribution(
-                    low=0.6, high=1.0),
+                    low=0.6, high=1.0
+                ),
             ],
             [
                 NonStochasticAbruptChangeEnvironment.uniform_distribution(
-                    low=0.0, high=0.3),
+                    low=0.0, high=0.3
+                ),
                 NonStochasticAbruptChangeEnvironment.uniform_distribution(
-                    low=0.3, high=0.6),
+                    low=0.3, high=0.6
+                ),
                 NonStochasticAbruptChangeEnvironment.uniform_distribution(
-                    low=0.6, high=1.0),
+                    low=0.6, high=1.0
+                ),
             ],
             [
                 NonStochasticAbruptChangeEnvironment.uniform_distribution(
-                    low=0.0, high=0.3),
+                    low=0.0, high=0.3
+                ),
                 NonStochasticAbruptChangeEnvironment.uniform_distribution(
-                    low=0.3, high=0.6),
+                    low=0.3, high=0.6
+                ),
                 NonStochasticAbruptChangeEnvironment.uniform_distribution(
-                    low=0.6, high=1.0),
+                    low=0.6, high=1.0
+                ),
             ],
         ],
         interval_length=50,
         num_rounds=200,
-        seed=42
+        seed=42,
     )
 
     assert env.valuations.shape == (
-        3, 200), f"Expected shape (3, 200), got {env.valuations.shape}"
+        3,
+        200,
+    ), f"Expected shape (3, 200), got {env.valuations.shape}"
     assert env.time_horizon == 200, f"Expected time_horizon 200, got {env.time_horizon}"
