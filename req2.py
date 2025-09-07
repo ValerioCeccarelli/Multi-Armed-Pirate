@@ -11,6 +11,7 @@ from plotting import (
     plot_price_frequency_histograms,
     plot_cumulative_regret,
     plot_budget_evolution,
+    plot_animated_price_frequency_histograms,
 )
 
 
@@ -279,6 +280,16 @@ plot_price_frequency_histograms(
     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
     prices=prices,
     agents_names=["Baseline Agent"],
+)
+
+# Genera e salva animazione per l'agente Combinatorial UCB
+print("Generando animazione per l'agente Combinatorial UCB...")
+plot_animated_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    prices=prices,
+    agents_names=["Combinatorial UCB"],
+    save_path_prefix="req2_animation_combinatorial_ucb"
 )
 
 plt.show()

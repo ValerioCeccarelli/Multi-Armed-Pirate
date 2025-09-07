@@ -146,25 +146,92 @@ def plot_animated_price_frequency_histograms(
 
         def update(frame):
             for item_idx in range(num_items):
-                agent_played_arms = agents_played_arms[agent_idx,
-                                                       0, item_idx, :]
-                freq = Counter(agent_played_arms[:frame*100 + 1])
                 axes[item_idx].cla()
-                axes[item_idx].set_title(f"Item {item_idx}")
+                axes[item_idx].set_title(f"Item {item_idx + 1} (Time: {min(frame * 10 + 1, time_horizon)})")
                 axes[item_idx].set_xlabel("Price")
-                axes[item_idx].set_ylabel("Frequency")
-                axes[item_idx].set_xlim(prices[0], prices[-1])
-                axes[item_idx].bar(
-                    [prices[arm] for arm in freq.keys()],
-                    [freq[arm] for arm in freq.keys()],
-                    width=0.05,
-                    color='skyblue'
-                )
+                axes[item_idx].set_ylabel("Mean Frequency")
+                
+                # Calculate successful and failed purchases up to current frame
+                end_frame = min(frame * 10 + 1, time_horizon)
+                arm_idx_to_num_successful_pulls = dict()
+                arm_idx_to_num_failed_pulls = dict()
+                
+                for trial_idx in range(num_trials):
+                    for t in range(end_frame):
+                        curr_valuation = valuations[trial_idx, item_idx, t]
+                        played_arm = agents_played_arms[agent_idx, trial_idx, item_idx, t]
+                        
+                        if played_arm == -1:
+                            break  # Budget exhausted
+                            
+                        if curr_valuation >= prices[played_arm]:
+                            arm_idx_to_num_successful_pulls[played_arm] = (
+                                arm_idx_to_num_successful_pulls.get(played_arm, 0) + 1
+                            )
+                        else:
+                            arm_idx_to_num_failed_pulls[played_arm] = (
+                                arm_idx_to_num_failed_pulls.get(played_arm, 0) + 1
+                            )
+                
+                # Calculate mean frequencies across trials
+                success_freq = {
+                    arm_idx: num_successful_pulls / num_trials
+                    for arm_idx, num_successful_pulls in arm_idx_to_num_successful_pulls.items()
+                }
+                failure_freq = {
+                    arm_idx: num_failed_pulls / num_trials
+                    for arm_idx, num_failed_pulls in arm_idx_to_num_failed_pulls.items()
+                }
+                
+                all_arms = set(success_freq.keys()) | set(failure_freq.keys())
+                if all_arms:
+                    sorted_arms = sorted(list(all_arms))
+                    successes = np.array([success_freq.get(arm, 0) for arm in sorted_arms])
+                    failures = np.array([failure_freq.get(arm, 0) for arm in sorted_arms])
+                    bar_prices = [prices[arm] for arm in sorted_arms]
+                    
+                    bar_width = 0.05
+                    x_positions = np.array(bar_prices)
+                    
+                    # Create stacked bars like in the static plot
+                    axes[item_idx].bar(
+                        x_positions,
+                        successes,
+                        bar_width,
+                        label="Successful Purchases",
+                        color="green",
+                        alpha=0.7,
+                    )
+                    axes[item_idx].bar(
+                        x_positions,
+                        failures,
+                        bar_width,
+                        bottom=successes,
+                        label="Failed Purchases",
+                        color="pink",
+                        alpha=1,
+                    )
+                    
+                    # Set consistent y-axis limits
+                    max_height = np.max(successes + failures) if len(successes) > 0 else 1
+                    axes[item_idx].set_ylim(0, max_height * 1.1)
+                
+                axes[item_idx].set_xlim(prices[0] - 0.05, prices[-1] + 0.05)
+                axes[item_idx].grid(True, alpha=0.3)
+                axes[item_idx].legend()
+                
             return axes
 
-        ani = FuncAnimation(fig, update, frames=time_horizon, interval=500,
+        # Adjust frames to be reasonable for the animation
+        total_frames = min(100, time_horizon // 10)
+        ani = FuncAnimation(fig, update, frames=total_frames, interval=200,
                             blit=False, repeat=True)
 
+        # Save the animation 
+        save_path = f"{save_path_prefix}_{agents_names[agent_idx]}.gif"
+        ani.save(save_path, writer='pillow', fps=5)
+        print(f"Animazione salvata in: {save_path}")
+        
         plt.show()
 
 

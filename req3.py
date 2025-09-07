@@ -11,6 +11,7 @@ from plotting import (
     plot_price_frequency_histograms,
     plot_cumulative_regret,
     plot_budget_evolution,
+    plot_animated_price_frequency_histograms,
 )
 
 
@@ -281,6 +282,16 @@ plot_price_frequency_histograms(
     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
     prices=prices,
     agents_names=["Baseline Agent"],
+)
+
+# Genera e salva animazione per l'agente Primal Dual
+print("Generando animazione per l'agente Primal Dual...")
+plot_animated_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    prices=prices,
+    agents_names=["Primal Dual"],
+    save_path_prefix="req3_animation_primal_dual"
 )
 
 plt.show()

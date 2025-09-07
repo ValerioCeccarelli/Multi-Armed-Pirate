@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from environments import Environment, StochasticEnvironment
 from agents import Agent, UCBAgent, CombinatorialUCBBidding
 from baselines import FixedActionBaselineAgent
-from plotting import plot_price_frequency_histograms, plot_cumulative_regret, plot_budget_evolution
+from plotting import plot_price_frequency_histograms, plot_cumulative_regret, plot_budget_evolution, plot_animated_price_frequency_histograms
 
 
 @dataclass
@@ -197,7 +197,7 @@ def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
         config, BaselineAgentConfig), f"Expected BaselineAgentConfig, got {type(config)}"
     return FixedActionBaselineAgent(
         num_items=env.num_items,
-        price_set=prices,
+        prices=prices,
         time_horizon=time_horizon,
         valuations=env.valuations,
         budget=config.budget
@@ -309,6 +309,16 @@ plot_price_frequency_histograms(
     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
     prices=prices,
     agents_names=["Baseline Agent"],
+)
+
+# Genera e salva animazione per l'agente UCB
+print("Generando animazione per l'agente UCB...")
+plot_animated_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    prices=prices,
+    agents_names=["UCB Agent"],
+    save_path_prefix="req1_animation_ucb"
 )
 
 plt.show()
