@@ -12,6 +12,7 @@ from plotting import (
     plot_cumulative_regret,
     plot_budget_evolution,
     plot_animated_price_frequency_histograms,
+    plot_conversion_rates,
 )
 
 
@@ -265,8 +266,8 @@ plot_cumulative_regret(
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
-    agents_names=["Combinatorial UCB"],
-    title="Cumulative Regret: Combinatorial UCB vs Fixed Baseline",
+    agents_names=["MultiProduct Primal Dual"],
+    title="Cumulative Regret: MultiProduct Primal Dual vs Optimal Baseline",
     ax=axes[0],
 )
 
@@ -274,32 +275,42 @@ plot_budget_evolution(
     valuations=results.valuations,
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["Combinatorial UCB"],
+    agents_names=["MultiProduct Primal Dual"],
     initial_budget=budget,
     ax=axes[1],
+)
+
+# Conversion rates as a separate plot with dual subplots
+plot_conversion_rates(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    baseline_played_arms=results.baseline_played_arms,
+    prices=prices,
+    agents_names=["MultiProduct Primal Dual"]
 )
 
 plot_price_frequency_histograms(
     valuations=results.valuations,
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["Combinatorial UCB"],
+    agents_names=["MultiProduct Primal Dual"],
 )
 
-# plot_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
-#     prices=prices,
-#     agents_names=["Baseline Agent"],
-# )
+plot_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
+    prices=prices,
+    agents_names=["Baseline Agent"],
+)
 
-# Genera e salva animazione per l'agente Primal Dual
-# print("Generando animazione per l'agente Primal Dual...")
-# plot_animated_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-#     prices=prices,
-#     agents_names=["Primal Dual"],
-# )
+# Genera e salva animazione per l'agente MultiProduct Primal Dual
+print("Generando animazione per l'agente MultiProduct Primal Dual...")
+plot_animated_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    prices=prices,
+    agents_names=["MultiProduct Primal Dual"],
+    save_path_prefix="req4_animation_multiproduct_primal_dual"
+)
 
 plt.show()

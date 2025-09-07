@@ -306,13 +306,14 @@ plot_price_frequency_histograms(
     agents_names=["OptimalDistributionSingleItemBaselineAgent"],
 )
 
-# Genera e salva animazione per l'agente Primal Dual
-# print("Generando animazione per l'agente Primal Dual...")
-# plot_animated_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-#     prices=prices,
-#     agents_names=["FFPrimalDualPricingAgent"],
-# )
+# Genera e salva animazione per l'agente FFPrimalDualPricingAgent
+print("Generando animazione per l'agente FFPrimalDualPricingAgent...")
+plot_animated_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    prices=prices,
+    agents_names=["FFPrimalDualPricingAgent"],
+    save_path_prefix="req3_animation_ffprimal_dual"
+)
 
 plt.show()

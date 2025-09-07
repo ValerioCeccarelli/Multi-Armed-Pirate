@@ -16,6 +16,7 @@ from environments import (
 from plotting import (
     plot_animated_price_frequency_histograms,
     plot_budget_evolution,
+    plot_conversion_rates,
     plot_cumulative_regret,
     plot_price_frequency_histograms,
 )
@@ -314,8 +315,8 @@ plot_cumulative_regret(
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     baseline_played_arms=results.baseline_played_arms,
     prices=prices,
-    agents_names=["Combinatorial UCB"],
-    title="Cumulative Regret: Combinatorial UCB vs Fixed Baseline",
+    agents_names=["Sliding Window UCB"],
+    title="Cumulative Regret: Sliding Window UCB vs Optimal Baseline",
     ax=axes[0],
 )
 
@@ -323,32 +324,42 @@ plot_budget_evolution(
     valuations=results.valuations,
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["Combinatorial UCB"],
+    agents_names=["Sliding Window UCB"],
     initial_budget=budget,
     ax=axes[1],
+)
+
+# Conversion rates as a separate plot with dual subplots
+plot_conversion_rates(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    baseline_played_arms=results.baseline_played_arms,
+    prices=prices,
+    agents_names=["Sliding Window UCB"]
 )
 
 plot_price_frequency_histograms(
     valuations=results.valuations,
     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
     prices=prices,
-    agents_names=["Combinatorial UCB"],
+    agents_names=["Sliding Window UCB"],
 )
 
-# plot_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
-#     prices=prices,
-#     agents_names=["Baseline Agent"],
-# )
+plot_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
+    prices=prices,
+    agents_names=["Optimal Baseline"],
+)
 
-# Genera e salva animazione per l'agente Primal Dual
-# print("Generando animazione per l'agente Primal Dual...")
-# plot_animated_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-#     prices=prices,
-#     agents_names=["Primal Dual"],
-# )
+# Genera e salva animazione per l'agente Sliding Window UCB
+print("Generando animazione per l'agente Sliding Window UCB...")
+plot_animated_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    prices=prices,
+    agents_names=["Sliding Window UCB"],
+    save_path_prefix="req5_animation_sliding_window_ucb"
+)
 
 plt.show()
