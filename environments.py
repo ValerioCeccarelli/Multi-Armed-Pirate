@@ -168,13 +168,12 @@ class NonStochasticSmoothChangeEnvironment(Environment):
 
 
 class NonStochasticAbruptChangeEnvironment(StochasticEnvironment):
-    def __init__(self, distribution_functions: list[list[Callable[[], float]]], interval_length: int, num_rounds: int, seed: int = 42):
+    def __init__(self, distribution_functions: list[list[Callable[[], float]]], num_rounds: int, seed: int = 42):
         """
         Non-stationary environment where valuations change abruptly at fixed intervals.
 
         Args:
             distribution_functions (list[list[Callable[[], float]]]): List of lists of functions to generate random valuations for each interval (num_items, num_intervals)
-            interval_length (int): Length of each interval before a change occurs.
             num_rounds (int): Total number of rounds.
             seed (int): Random seed for reproducibility.
         """
@@ -185,16 +184,19 @@ class NonStochasticAbruptChangeEnvironment(StochasticEnvironment):
         self._num_intervals = len(distribution_functions[0])
         assert all(len(
             funcs) == self._num_intervals for funcs in distribution_functions), "All items must have the same number of intervals"
-        self._interval_length = interval_length
-        assert interval_length > 0, "Interval length must be positive"
+
         self._num_rounds = num_rounds
         self._rng = np.random.default_rng(seed)
 
         self._valuations = np.zeros(
             (self._num_items, self._num_rounds), dtype=np.float64)
 
+        assert num_rounds % self._num_intervals == 0, "num_rounds must be divisible by num_intervals"
+        self._interval_length = num_rounds // self._num_intervals
+
         for t in range(num_rounds):
-            interval_index = min(t // interval_length, self._num_intervals - 1)
+            interval_index = min(t // self._interval_length,
+                                 self._num_intervals - 1)
             for item_index in range(self._num_items):
                 self._valuations[item_index,
                                  t] = distribution_functions[item_index][interval_index]()
