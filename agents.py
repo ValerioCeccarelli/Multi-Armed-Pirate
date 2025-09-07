@@ -1091,15 +1091,25 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         self.lmbd_history: list[float] = []
         self.hedge_prob_history: list[list[np.ndarray]] = [
             [] for _ in range(n_products)]
+        
+        # Store last chosen arms to use in update
+        self.last_arms: Optional[NDArray[np.int64]] = None
 
     def pull_arm(self) -> NDArray[np.int64]:
         if self.B < 1:
-            return np.array([-1] * self.n_products, dtype=np.int64)
+            self.last_arms = np.array([-1] * self.n_products, dtype=np.int64)
+            return self.last_arms
+        
         arms: list[int] = [hedge.pull_arm() for hedge in self.hedges]
-        return np.array(arms, dtype=np.int64)
+        self.last_arms = np.array(arms, dtype=np.int64)
+        return self.last_arms
 
     def update(self, reward: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
-        arms: list[int] | None = self.pull_arm()
+        # Use the arms that were actually chosen in pull_arm(), not new ones!
+        if self.last_arms is None or np.all(self.last_arms == -1):
+            return  # Budget depleted, no update needed
+            
+        arms = self.last_arms
         total_revenue: float = 0.0
         total_units_sold: int = 0
         losses: list[np.ndarray] = []
@@ -1109,32 +1119,48 @@ class MultiProductFFPrimalDualPricingAgent(Agent):
         norm_factor: float = L_up - L_low + 1e-12
 
         for j in range(self.n_products):
-            if arms is None:
+            arm: int = arms[j]
+            if arm == -1:  # Budget exhausted for this item
                 losses.append(np.zeros(self.K))
                 continue
-            arm: int = arms[j]
 
             p_chosen: float = self.prices[arm]
-            sale: int = 1 if reward[j] >= 0 else 0
-            f_val: float = p_chosen * sale
+            # FIXED: Check if sale occurred based on reward > 0 (which means valuation >= price)
+            sale: int = 1 if reward[j] > 0 else 0
+            f_val: float = reward[j]  # Use actual reward received, not p_chosen * sale
             total_revenue += f_val
             total_units_sold += sale
 
-            v_t = full_rewards  # (num_items, )
-            val_j: float = float(v_t[j])
-            would_sell: np.ndarray = (self.prices <= val_j).astype(float)
-            f_vec: np.ndarray = self.prices * would_sell
-            L_vec: np.ndarray = f_vec - self.lmbd * (would_sell - self.rho)
-            loss_vec: np.ndarray = 1.0 - (L_vec - L_low) / norm_factor
-            loss_vec[-1] = 1.0
-            losses.append(loss_vec)
+            # Full feedback update using valuations
+            if full_rewards is not None:
+                v_t = full_rewards  # (num_items, )
+                val_j: float = float(v_t[j])
+                would_sell: np.ndarray = (self.prices <= val_j).astype(float)
+                f_vec: np.ndarray = self.prices * would_sell
+                L_vec: np.ndarray = f_vec - self.lmbd * (would_sell - self.rho)
+                loss_vec: np.ndarray = 1.0 - (L_vec - L_low) / norm_factor
+                loss_vec = np.clip(loss_vec, 0.0, 1.0)  # Clip to valid range
+                losses.append(loss_vec)
+            else:
+                # Bandit feedback fallback
+                loss_vec = np.zeros(self.K)
+                if sale == 1:
+                    lagrangian = f_val - self.lmbd * (sale - self.rho)
+                    normalized_reward = (lagrangian - L_low) / norm_factor
+                    normalized_reward = np.clip(normalized_reward, 0.0, 1.0)
+                    loss_vec[arm] = 1.0 - normalized_reward
+                else:
+                    loss_vec[arm] = 1.0  # No reward, full loss
+                losses.append(loss_vec)
 
+        # Update hedge agents
         for j in range(self.n_products):
             self.hedges[j].update(losses[j])
             prob_j = self.hedges[j].weights / np.sum(self.hedges[j].weights)
             self.hedge_prob_history[j].append(prob_j.copy())
 
+        # Update budget and dual variable
         self.B -= total_units_sold
         self.lmbd = np.clip(self.lmbd - self.eta * (self.rho * self.n_products - total_units_sold),
-                            a_min=0.0, a_max=1 / self.rho)
+                            a_min=0.0, a_max=1 / self.rho if self.rho > 0 else 1.0)
         self.lmbd_history.append(self.lmbd)

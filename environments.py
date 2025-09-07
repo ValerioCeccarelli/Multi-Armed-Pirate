@@ -88,7 +88,7 @@ class StochasticEnvironment(Environment):
 
 
 class NonStochasticSmoothChangeEnvironment(Environment):
-    def __init__(self, distribution_functions: list[Callable[[int], float]], num_rounds: int, seed: int = 42):
+    def __init__(self, distribution_functions: list[Callable[[int], float]], num_rounds: int, seed: int = 62):
         """
         Non-stationary environment where valuations change smoothly over time.
 
