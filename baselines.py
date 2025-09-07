@@ -2,6 +2,7 @@ import itertools
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.optimize import linprog
 
 from agents import Agent
 
@@ -53,7 +54,8 @@ class FixedActionBaselineAgent:
         )
 
         self.optimal_indexes = np.array(
-            [self.prices.index(p) if p in self.prices else 0 for p in optimal_prices],
+            [self.prices.index(
+                p) if p in self.prices else 0 for p in optimal_prices],
             dtype=int,
         )
 
@@ -206,6 +208,74 @@ class PerfectBaseline:
         self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None
     ) -> None:
         self.current_round += 1
+
+
+class OptimalDistributionSingleItemBaselineAgent:
+    def __init__(
+        self,
+        valuations: NDArray[np.float64],
+        prices: NDArray[np.float64],
+        time_horizon: int,
+        budget: int = None,
+    ):
+        # TODO: implement all the asserts later
+        self.valuations = valuations
+        self.prices = prices
+        self.time_horizon = time_horizon
+        self.budget = budget if budget is not None else time_horizon
+        self.num_items = valuations.shape[0]
+        assert self.num_items == 1, "Only single item is supported"
+
+        self.sell_probabilities = self.compute_sell_probabilities()
+        self.optimal_distribution = self.compute_clairvoyant_single_product()
+
+    def compute_sell_probabilities(self) -> np.ndarray:
+        """Compute sell probabilities for each price"""
+        sell_probabilities: np.ndarray = np.array([
+            float(np.sum(p <= self.valuations)) / self.time_horizon for p in self.prices
+        ])
+        return sell_probabilities
+
+    def compute_clairvoyant_single_product(self) -> NDArray[np.float64]:
+        """
+        Compute clairvoyant solution for single product using LP.
+
+        Args:
+            prices: array of available prices
+            sell_probabilities: selling probability for each price
+            budget: total budget
+            horizon: time horizon
+
+        Returns:
+            gamma: optimal distribution over prices
+        """
+        rho = self.budget / self.time_horizon
+
+        c = -(self.prices * self.sell_probabilities)
+        A_ub = [self.sell_probabilities]
+        b_ub = [rho]
+        A_eq = [np.ones(len(self.prices))]
+        b_eq = [1]
+
+        res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq,
+                      b_eq=b_eq, bounds=(0, 1))
+
+        if not res.success:
+            raise ValueError("LP failed: " + res.message)
+
+        return res.x  # optimal distribution over prices
+
+    def pull_arm(self) -> NDArray[np.int64]:
+        """Sample price indexes for each item based on the optimal distribution."""
+        sampled_indexes = np.random.choice(
+            a=len(self.prices),
+            size=self.num_items,
+            p=self.optimal_distribution,
+        )
+        return sampled_indexes
+
+    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
+        pass
 
 
 if __name__ == "__main__":

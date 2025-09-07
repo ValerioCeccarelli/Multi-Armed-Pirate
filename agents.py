@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Tuple
 from numpy.typing import NDArray
 import numpy as np
 import math
@@ -65,41 +65,6 @@ class UCBAgent(Agent):
             reward - self.values[self._last_price_index]) / self.counts[self._last_price_index]
 
         self._last_price_index = -1  # Reset for next round
-
-
-class Exp3PAgent:
-    """
-    EXP3.P agent for adversarial bandits with high-probability regret bounds.
-    Simplified version for use as a sub-agent in PrimalDualAgent.
-    """
-
-    def __init__(self, K: int, T: int, delta: float = 0.1):
-        self.K = K
-        self.T = T
-        self.delta = delta
-        self.eta = math.log(K / delta) / (T * K)
-        self.gamma = 0.95 * math.log(K) / (T * K)
-        self.beta = K * math.log(K) / T
-        self.G = np.zeros(K)
-        self.probs = np.ones(K) / K
-
-    def _compute_probs(self) -> np.ndarray:
-        expG = np.exp(self.eta * self.G)
-        base = (1 - self.gamma) * (expG / expG.sum())
-        probs = base + self.gamma / self.K
-        return probs / probs.sum()
-
-    def pull_arm(self) -> int:
-        self.probs = self._compute_probs()
-        choice = int(np.random.choice(self.K, p=self.probs))
-        return choice
-
-    def update(self, chosen: int, reward: float) -> None:
-        for i in range(self.K):
-            if i != chosen:
-                self.G[i] += self.beta / self.probs[i]
-            else:
-                self.G[i] += (reward + self.beta) / self.probs[i]
 
 
 class PrimalDualAgent(Agent):
@@ -294,6 +259,93 @@ class MultiProductPrimalDualAgent(Agent):
 
         # Reset for next round
         self._last_price_indices = [-1] * self.num_items
+
+
+class Exp3PAgent(Agent):
+    def __init__(self, K: int, T: int, delta: float = 0.1):
+        self.K = K
+        self.T = T
+        self.delta = delta
+        self.eta = math.log(K / delta) / (T * K)
+        self.gamma = 0.95 * math.log(K) / (T * K)
+        self.beta = K * math.log(K) / T
+        self.G = np.zeros(K)
+        self.probs = np.ones(K) / K
+
+    def _compute_probs(self) -> np.ndarray:
+        expG = np.exp(self.eta * self.G)
+        base = (1 - self.gamma) * (expG / expG.sum())
+        probs = base + self.gamma / self.K
+        return probs / probs.sum()
+
+    def pull_arm(self) -> int:
+        self.probs = self._compute_probs()
+        choice = int(np.random.choice(self.K, p=self.probs))
+        return choice
+
+    def update(self, chosen: int, reward: float) -> None:
+        for i in range(self.K):
+            if i != chosen:
+                self.G[i] += self.beta / self.probs[i]
+            else:
+                self.G[i] += (reward + self.beta) / self.probs[i]
+
+
+class BanditFeedbackPrimalDual(Agent):
+    """Primal-Dual agent with Bandit Feedback for non-stationary pricing using EXP3.P."""
+
+    def __init__(self, prices: np.ndarray, T: int, B: float) -> None:
+        self.prices: np.ndarray = np.array(prices)
+        self.K: int = len(prices)
+        self.T: int = T
+        self.B: float = B
+        self.eta: float = 1 / np.sqrt(T)
+        self.rng = np.random.default_rng()
+        # Use EXP3.P as the primal (hedge) agent with a given delta
+        self.exp3p: Exp3PAgent = Exp3PAgent(K=self.K, T=self.T, delta=0.05)
+        self.rho: float = B / T
+        self.lmbd: float = 1.0
+        self.pull_counts: np.ndarray = np.zeros(self.K, int)
+        self.last_arm: Optional[int] = None
+        # History tracking for analysis
+        self.lmbd_history: list[float] = []
+        self.exp3p_weight_history: list[np.ndarray] = []
+
+    def pull_arm(self) -> NDArray[np.int64]:
+        if self.B < 1:
+            self.last_arm = None
+            return np.array([-1])
+        self.last_arm = self.exp3p.pull_arm()
+        return np.array([self.last_arm])
+
+    def update(self, rewards: NDArray[np.float64], full_rewards: NDArray[np.float64] = None) -> None:
+        if self.last_arm is None:
+            return
+
+        price_chosen = self.prices[self.last_arm]
+        c_t = 1 if rewards[0] > 0 else 0  # cost is 1 if sold, 0 otherwise
+
+        f_t = rewards[0]  # revenue is the reward received
+        self.B -= c_t
+        self.pull_counts[self.last_arm] += 1
+
+        net = f_t - self.lmbd * (c_t - self.rho)
+
+        # Normalize
+        p_max = self.prices.max()
+        L_up = p_max - self.lmbd * (0 - self.rho)
+        L_low = 0.0 - self.lmbd * (1 - self.rho)
+        norm_factor = L_up - L_low + 1e-12
+        net_norm = (net - L_low) / norm_factor
+
+        # Update the EXP3.P sub-agent using the bandit reward feedback for the chosen arm
+        self.exp3p.probs = self.exp3p._compute_probs()
+        self.exp3p.update(self.last_arm, net_norm)
+
+        # Update the dual variable lambda
+        self.lmbd = np.clip(self.lmbd - self.eta *
+                            (self.rho - c_t), a_min=0.0, a_max=1.0 / self.rho)
+        self.lmbd_history.append(self.lmbd)
 
 
 class CombinatorialUCBBidding:
