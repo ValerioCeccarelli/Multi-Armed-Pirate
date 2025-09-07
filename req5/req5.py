@@ -1,13 +1,21 @@
+import os
+import sys
 from dataclasses import dataclass
 from typing import Callable, TypeVar
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 
-from ..agents import Agent, CombinatorialUCBBiddingSlidingWindow
-from ..baselines import OptimalDistributionMultiItemBaselineAgent
-from ..environments import (
+from agents import Agent, CombinatorialUCBBiddingSlidingWindow
+from baselines import (
+    FixedActionBaselineAgent,
+    OptimalDistributionMultiItemBaselineAgent,
+)
+from environments import (
     Environment,
     NonStochasticAbruptChangeEnvironment,
     NonStochasticSmoothChangeEnvironment,
@@ -146,8 +154,7 @@ def run_multiple_simulations(
     num_items = temp_env.num_items
     time_horizon = temp_env.time_horizon
 
-    valuations = np.zeros(
-        (num_trials, num_items, time_horizon), dtype=np.float64)
+    valuations = np.zeros((num_trials, num_items, time_horizon), dtype=np.float64)
 
     agent_played_arms = np.full(
         (num_trials, num_items, time_horizon), -1, dtype=np.int64
@@ -183,65 +190,47 @@ def run_multiple_simulations(
 print("Task: Multiple items (3) with budget constraint")
 
 num_trials = 2
-time_horizon = 6_000
+time_horizon = 12_000
 prices = np.linspace(0.1, 1.0, 10)
 num_prices = len(prices)
 num_items = 3
-budget = 5_000
+budget = 12_000
 
 
-def env_builder() -> Environment:
+def env_builder1() -> Environment:
+    low = NonStochasticAbruptChangeEnvironment.gaussian_distribution(
+        mean=0.25, std=0.05
+    )
+    medium = NonStochasticAbruptChangeEnvironment.gaussian_distribution(
+        mean=0.5, std=0.05
+    )
+    high = NonStochasticAbruptChangeEnvironment.gaussian_distribution(
+        mean=0.75, std=0.05
+    )
     return NonStochasticAbruptChangeEnvironment(
         distribution_functions=[
-            [
-                NonStochasticAbruptChangeEnvironment.gaussian_distribution(
-                    mean=0.2, std=0.05
-                ),
-                NonStochasticAbruptChangeEnvironment.gaussian_distribution(
-                    mean=0.7, std=0.05
-                ),
-                NonStochasticAbruptChangeEnvironment.gaussian_distribution(
-                    mean=0.2, std=0.05
-                ),
-            ],
-            [
-                NonStochasticAbruptChangeEnvironment.gaussian_distribution(
-                    mean=0.7, std=0.05
-                ),
-                NonStochasticAbruptChangeEnvironment.gaussian_distribution(
-                    mean=0.2, std=0.05
-                ),
-                NonStochasticAbruptChangeEnvironment.gaussian_distribution(
-                    mean=0.7, std=0.05
-                ),
-            ],
-            [
-                NonStochasticAbruptChangeEnvironment.gaussian_distribution(
-                    mean=0.3, std=0.05
-                ),
-                NonStochasticAbruptChangeEnvironment.gaussian_distribution(
-                    mean=0.4, std=0.05
-                ),
-                NonStochasticAbruptChangeEnvironment.gaussian_distribution(
-                    mean=0.3, std=0.05
-                ),
-            ],
+            [low, high, low],
+            [high, low, high],
+            [medium, medium, medium],
         ],
         num_rounds=time_horizon,
     )
-    # return NonStochasticSmoothChangeEnvironment(
-    #     distribution_functions=[
-    #         NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-    #             time_horizon, 1),
-    #         NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-    #             time_horizon, 1),
-    #         NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-    #             time_horizon, 1),
-    #         NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-    #             time_horizon, 1),
-    #     ],
-    #     num_rounds=time_horizon,
-    # )
+
+
+def env_builder2() -> Environment:
+    low = NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
+        time_horizon=time_horizon, freq=1
+    )
+    medium = NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
+        time_horizon=time_horizon, freq=2
+    )
+    high = NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
+        time_horizon=time_horizon, freq=3
+    )
+    return NonStochasticSmoothChangeEnvironment(
+        distribution_functions=[low, medium, high],
+        num_rounds=time_horizon,
+    )
 
 
 @dataclass
@@ -263,7 +252,7 @@ def combinatorial_agent_builder(
         price_set=prices,
         budget=config.budget,
         time_horizon=time_horizon,
-        window_size=50,
+        window_size=500,
     )
 
 
@@ -277,8 +266,9 @@ def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
     assert isinstance(
         config, BaselineAgentConfig
     ), f"Expected BaselineAgentConfig, got {type(config)}"
-    return OptimalDistributionMultiItemBaselineAgent(
+    return FixedActionBaselineAgent(
         prices=prices,
+        num_items=env.num_items,
         valuations=env.valuations,
         time_horizon=time_horizon,
         budget=config.budget,
@@ -286,7 +276,7 @@ def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
 
 
 results = run_multiple_simulations(
-    env_builder=env_builder,
+    env_builder=env_builder2,
     agent_builder=combinatorial_agent_builder,
     baseline_builder=baseline_builder,
     num_trials=num_trials,
@@ -321,18 +311,27 @@ plot_budget_evolution(
 fig.savefig("req5_cumulative_regret_budget_evolution.png")
 
 
-temp_env = env_builder()
+temp_env = env_builder2()
+plot_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.baseline_played_arms[np.newaxis, :, :, :],
+    prices=prices,
+    agents_names=[f"Optimal Baseline"],
+    save_plot=True,
+    save_path_prefix=f"req5_price_histogram_baseline",
+)
 
-for interval_index in range(temp_env._num_intervals):
-    interval_length = temp_env._interval_length
+for interval_index in range(3):
+    interval_length = time_horizon // 3
     start_time = interval_index * interval_length
     end_time = start_time + interval_length
 
     plot_conversion_rates(
         valuations=results.valuations[:, :, start_time:end_time],
-        agents_played_arms=results.agent_played_arms[np.newaxis, :, :,
-                                                     start_time:end_time],
-        baseline_played_arms=results.baseline_played_arms,
+        agents_played_arms=results.agent_played_arms[
+            np.newaxis, :, :, start_time:end_time
+        ],
+        baseline_played_arms=results.baseline_played_arms[:, :, start_time:end_time],
         prices=prices,
         agents_names=[f"Sliding Window UCB (Interval {interval_index + 1})"],
         save_plot=True,
@@ -341,8 +340,9 @@ for interval_index in range(temp_env._num_intervals):
 
     plot_price_frequency_histograms(
         valuations=results.valuations[:, :, start_time:end_time],
-        agents_played_arms=results.agent_played_arms[np.newaxis,
-                                                     :, :, start_time:end_time],
+        agents_played_arms=results.agent_played_arms[
+            np.newaxis, :, :, start_time:end_time
+        ],
         prices=prices,
         agents_names=[f"Sliding Window UCB (Interval {interval_index + 1})"],
         save_plot=True,
@@ -350,13 +350,14 @@ for interval_index in range(temp_env._num_intervals):
     )
 
 # Genera e salva animazione per l'agente Sliding Window UCB
-print("Generando animazione per l'agente Sliding Window UCB...")
-plot_animated_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-    prices=prices,
-    agents_names=["Sliding Window UCB"],
-    save_path_prefix="req5_animation_sliding_window_ucb"
-)
+# print("Generando animazione per l'agente Sliding Window UCB...")
+# plot_animated_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+#     prices=prices,
+#     number_of_frames=100,
+#     agents_names=["Sliding Window UCB"],
+#     save_path_prefix="req5_animation_sliding_window_ucb",
+# )
 
 plt.show()
