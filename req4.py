@@ -177,11 +177,11 @@ def run_multiple_simulations(
 print("Task: Multiple items (3) with budget constraint")
 
 num_trials = 2
-time_horizon = 20_000
+time_horizon = 10_000
 prices = np.linspace(0.1, 1.0, 10)
 num_prices = len(prices)
-num_items = 3
-budget = 18_000  # integer budget
+num_items = 4
+budget = 8_000
 
 
 def env_builder() -> Environment:
@@ -193,12 +193,14 @@ def env_builder() -> Environment:
     # )
     return NonStochasticSmoothChangeEnvironment(
         distribution_functions=[
-            NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
-                time_horizon, 50),
-            NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
-                time_horizon, 50),
-            NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
-                time_horizon, 50),
+            NonStochasticSmoothChangeEnvironment.generate_simple_tv(
+                time_horizon, 1),
+            NonStochasticSmoothChangeEnvironment.generate_simple_tv(
+                time_horizon, 1),
+            NonStochasticSmoothChangeEnvironment.generate_simple_tv(
+                time_horizon, 1),
+            NonStochasticSmoothChangeEnvironment.generate_simple_tv(
+                time_horizon, 1),
         ],
         num_rounds=time_horizon,
     )
@@ -249,7 +251,8 @@ results = run_multiple_simulations(
     baseline_builder=baseline_builder,
     num_trials=num_trials,
     agent_config=MultiProductFFPrimalDualPricingAgentConfig(
-        num_items=num_items, num_prices=num_prices, budget=budget, eta=0.01
+        num_items=num_items, num_prices=num_prices, budget=budget, eta=1 /
+        np.sqrt(time_horizon)
     ),
     baseline_config=BaselineAgentConfig(budget=budget),
     prices=prices,
@@ -291,12 +294,12 @@ plot_price_frequency_histograms(
 # )
 
 # Genera e salva animazione per l'agente Primal Dual
-print("Generando animazione per l'agente Primal Dual...")
-plot_animated_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-    prices=prices,
-    agents_names=["Primal Dual"],
-)
+# print("Generando animazione per l'agente Primal Dual...")
+# plot_animated_price_frequency_histograms(
+#     valuations=results.valuations,
+#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+#     prices=prices,
+#     agents_names=["Primal Dual"],
+# )
 
 plt.show()

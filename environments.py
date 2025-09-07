@@ -117,6 +117,33 @@ class NonStochasticSmoothChangeEnvironment(Environment):
             return np.random.beta(alpha_t, beta_t)
         return distribution
 
+    @classmethod
+    def generate_simple_tv(cls, time_horizon: int, num_items: int) -> Callable[[int], float]:
+        """Generate simple time-varying valuations"""
+
+        phi = 0.0
+        mu0, A, f = 0.5, 0.1, 100
+        sigma0, A_sigma, phi_sigma, rho0 = 0.1, 0.1, 0, 0.6
+
+        rng = np.random.default_rng(0)
+        T = time_horizon
+        m = num_items
+        V: np.ndarray = np.empty((T, m))
+        R: np.ndarray = np.eye(m) + (1 - np.eye(m)) * rho0
+
+        def distribution(t: int) -> float:
+            mu_t = mu0 + A * np.sin(2 * np.pi * f * t / T + phi)
+            sigma_t = sigma0 + A_sigma * \
+                np.sin(2 * np.pi * f * t / T + phi_sigma)
+            Sigma: np.ndarray = np.diag(
+                [sigma_t] * m) @ R @ np.diag([sigma_t] * m)
+            sample: np.ndarray = rng.multivariate_normal([mu_t] * m, Sigma)
+            # print(sample.shape, sample)
+            # raise NotImplementedError("Check the shape of the sample")
+            return np.clip(sample[0], 0, 1)
+
+        return distribution
+
     def round(self, round: int) -> NDArray[np.float64]:
         return self._valuations[:, round]
 
