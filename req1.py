@@ -68,6 +68,66 @@ plot_price_frequency_histograms(
     save_path_prefix="req1/task1_1_ucb_agent_histogram"
 )
 
+print("Task 1.1.2:  Without budget constraint but more arms")
+
+# num_trials = 2
+# time_horizon = 10000
+num_prices = 100
+prices = np.linspace(0.1, 1, num_prices, dtype=np.float64)
+
+
+def env_builder() -> Environment:
+    return StochasticEnvironment(
+        distribution_functions=[
+            StochasticEnvironment.gaussian_distribution(mean=0.5, std=0.1)],
+        num_rounds=time_horizon,
+    )
+
+
+def agent_builder(env: Environment) -> Agent:
+    return UCBAgent(
+        num_prices=num_prices,
+    )
+
+
+def baseline_builder(env: Environment) -> Agent:
+    return FixedActionBaselineAgent(
+        num_items=env.num_items,
+        prices=prices,
+        time_horizon=time_horizon,
+        valuations=env.valuations,
+    )
+
+
+results = run_multiple_simulations(
+    env_builder=env_builder,
+    agent_builders=[
+        baseline_builder,
+        agent_builder,
+    ],
+    num_trials=num_trials,
+    prices=prices
+)
+
+plot_cumulative_regret(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[[1], ...],
+    baseline_played_arms=results.agents_played_arms[0],
+    prices=prices,
+    agents_names=["UCB Agent"],
+    title="Cumulative Regret of UCB Agent vs Random Baseline",
+    save_plot=True,
+    save_path="req1/task1_1_2_cumulative_regret.png",
+)
+
+plot_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[[1], ...],
+    prices=prices,
+    agents_names=["UCB Agent"],
+    save_plot=True,
+    save_path_prefix="req1/task1_1_2_ucb_agent_histogram"
+)
 
 print("Task 1.2: With budget constraint")
 
@@ -75,6 +135,8 @@ print("Task 1.2: With budget constraint")
 
 time_horizon = 10000
 budget = 3000
+num_prices = 10
+prices = np.linspace(0.1, 1, num_prices, dtype=np.float64)
 
 
 def combinatorial_agent_builder(env: Environment) -> Agent:
