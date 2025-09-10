@@ -1,8 +1,8 @@
-from collections import Counter
 import numpy as np
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 from matplotlib.animation import FuncAnimation
+import os
 
 
 def plot_cumulative_regret(
@@ -103,6 +103,7 @@ def plot_cumulative_regret(
 
     if is_new_figure:
         if save_plot:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
             plt.savefig(save_path)
         plt.show()
 
@@ -237,6 +238,7 @@ def plot_animated_price_frequency_histograms(
         # Save the animation
         save_path = f"{save_path_prefix}_{agents_names[agent_idx]}.gif"
         if save_path_prefix:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
             ani.save(save_path, writer='pillow', fps=5)
         print(f"Animazione salvata in: {save_path}")
 
@@ -380,7 +382,9 @@ def plot_price_frequency_histograms(
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # adjust for suptitle
         if save_plot:
-            plt.savefig(f"{save_path_prefix}_{agents_names[agent_idx]}.png")
+            complete_path = f"{save_path_prefix}_{agents_names[agent_idx]}.png"
+            os.makedirs(os.path.dirname(complete_path), exist_ok=True)
+            plt.savefig(complete_path)
         # plt.show()
 
 
@@ -544,6 +548,7 @@ def plot_conversion_rates(
     plt.tight_layout()
 
     if save_plot:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
 
 
@@ -625,5 +630,7 @@ def plot_budget_evolution(
 
     if is_new_figure:
         if save_plot:
-            plt.savefig(f"{save_path_prefix}_budget_evolution.png")
+            complete_path = f"{save_path_prefix}_budget_evolution.png"
+            os.makedirs(os.path.dirname(complete_path), exist_ok=True)
+            plt.savefig(complete_path)
         # plt.show()
