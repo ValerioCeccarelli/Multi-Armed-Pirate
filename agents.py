@@ -426,7 +426,15 @@ class PrimalDualAgent(Agent):
 class MultiItemPrimalDualAgent(Agent):
     """Primal-Dual agent with Full-Feedback for multi-product pricing"""
 
-    def __init__(self, prices: NDArray[np.float64], time_horizon: int, budget: float, n_products: int, eta: float = None) -> None:
+    def __init__(
+            self,
+            prices: NDArray[np.float64],
+            time_horizon: int,
+            budget: float,
+            n_products: int,
+            eta: float = None,
+            dynamic_rho: bool = False
+    ) -> None:
         """
         Initialize the multi-item dual pricing agent.
         Args:
@@ -434,62 +442,75 @@ class MultiItemPrimalDualAgent(Agent):
             time_horizon: Time horizon of the simulation
             budget: Total initial budget
             eta: Learning rate for dual variable update
+            n_products: Number of products to price
+            dynamic_rho: Whether to use dynamic rho based on remaining budget and time
         """
-        self.prices = prices
+        self._prices = prices
         assert len(
             prices) > 1, "MultiItemPrimalDualAgent requires at least 2 prices."
-        self.num_prices = len(prices)
-        self.time_horizon = time_horizon
+        self._num_prices = len(prices)
+        self._time_horizon = time_horizon
         assert n_products > 0, "Number of products must be positive."
-        self.n_products = n_products
+        self._n_products = n_products
         assert budget > 0, "Budget must be positive."
-        self.budget = budget
-        self.rho = budget / (n_products * time_horizon)
-        self.eta = eta if eta is not None else 1.0 / \
+        self._budget = budget
+        self._rho = budget / (n_products * time_horizon)
+        self._eta = eta if eta is not None else 1.0 / \
             np.sqrt(time_horizon)
-        lr = np.sqrt(np.log(self.num_prices) / time_horizon)
-        self.hedges = [
-            HedgeAgent(self.num_prices, lr) for _ in range(n_products)
+        lr = np.sqrt(np.log(self._num_prices) / time_horizon)
+        self._hedges = [
+            HedgeAgent(self._num_prices, lr) for _ in range(n_products)
         ]
-        self.lmbd = 1.0
-        self.last_arms = np.array([-1] * self.n_products, dtype=np.int64)
+        self._lmbd = 1.0
+        self._last_arms = np.array([-1] * self._n_products, dtype=np.int64)
+        self._dynamic_rho = dynamic_rho
+        self._current_round = 0
 
     def pull_arm(self) -> NDArray[np.int64]:
-        if self.budget < 1:
-            self.last_arms = np.array([-1] * self.n_products, dtype=np.int64)
-            return self.last_arms
+        if self._budget < 1:
+            self._last_arms = np.array([-1] * self._n_products, dtype=np.int64)
+            return self._last_arms
 
-        arms = [hedge.pull_arm() for hedge in self.hedges]
-        self.last_arms = np.array(arms, dtype=np.int64)
-        return self.last_arms
+        arms = [hedge.pull_arm() for hedge in self._hedges]
+        self._last_arms = np.array(arms, dtype=np.int64)
+        return self._last_arms
 
     def update(
         self, reward: NDArray[np.float64], valuations: NDArray[np.float64] = None
     ) -> None:
-        if np.all(self.last_arms == -1):
+        if np.all(self._last_arms == -1):
             return
 
         total_units_sold: int = np.sum(reward > 0)
-        p_max = float(self.prices.max())
-        L_up = p_max - self.lmbd * (0 - self.rho)
-        L_low = 0.0 - self.lmbd * (1 - self.rho)
+        p_max = float(self._prices.max())
+        L_up = p_max - self._lmbd * (0 - self._rho)
+        L_low = 0.0 - self._lmbd * (1 - self._rho)
         norm_factor = L_up - L_low + 1e-10
 
-        for j in range(self.n_products):
-            would_sell = (self.prices <= valuations[j]).astype(float)
-            f_vec = self.prices * would_sell
-            L_vec = f_vec - self.lmbd * (would_sell - self.rho)
+        for j in range(self._n_products):
+            would_sell = (self._prices <= valuations[j]).astype(float)
+            f_vec = self._prices * would_sell
+            L_vec = f_vec - self._lmbd * (would_sell - self._rho)
             loss_vec = 1.0 - (L_vec - L_low) / norm_factor
             loss_vec = np.clip(loss_vec, 0.0, 1.0)
-            self.hedges[j].update(loss_vec)
+            self._hedges[j].update(loss_vec)
 
-        self.budget -= total_units_sold
-        self.lmbd = float(np.clip(
-            self.lmbd - self.eta *
-            (self.rho * self.n_products - total_units_sold),
+        self._budget -= total_units_sold
+        self._lmbd = float(np.clip(
+            self._lmbd - self._eta *
+            (self._rho * self._n_products - total_units_sold),
             a_min=0.0,
-            a_max=1 / self.rho if self.rho > 0 else 1.0,
+            a_max=1 / self._rho if self._rho > 0 else 1.0,
         ))
+
+        self._current_round += 1  # Assuming that the update is called once per round
+        if self._dynamic_rho:
+            remaining_rounds = self._time_horizon - self._current_round
+            if remaining_rounds > 0:
+                self._rho = self._budget / \
+                    (self._n_products * remaining_rounds)
+            else:
+                self._rho = 0.0
 
 
 # Task 5

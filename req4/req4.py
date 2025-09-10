@@ -214,6 +214,17 @@ def primal_dual_agent_builder(env: Environment) -> Agent:
     )
 
 
+def prima_dul_dual_agent_with_dynamic_rho_builder(env: Environment) -> Agent:
+    return MultiItemPrimalDualAgent(
+        prices=prices,
+        budget=budget,
+        time_horizon=time_horizon,
+        n_products=num_items,
+        eta=primal_dual_eta,
+        dynamic_rho=True
+    )
+
+
 def sliding_window_agent_builder(env: Environment) -> Agent:
     return CombinatorialUCBBiddingSlidingWindow(
         num_items=num_items,
@@ -240,6 +251,7 @@ results = run_multiple_simulations(
         primal_dual_agent_builder,
         combinatorial_agent_builder,
         sliding_window_agent_builder,
+        prima_dul_dual_agent_with_dynamic_rho_builder,
     ],
     baseline_builder=baseline_builder,
     num_trials=num_trials,
@@ -315,6 +327,29 @@ plot_budget_evolution(
 )
 
 fig.savefig("req4_primaldual_vs_ucbsliding_cumregret_budgetevolution.png")
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+plot_cumulative_regret(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[[0, 3], ...],
+    baseline_played_arms=results.baseline_played_arms,
+    prices=prices,
+    agents_names=["Fixed", "Dynamic"],
+    title="Cumulative Regret: Fixed vs Dynamic Rho",
+    ax=axes[0],
+)
+
+plot_budget_evolution(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[[0, 3], ...],
+    prices=prices,
+    agents_names=["Fixed", "Dynamic"],
+    initial_budget=budget,
+    ax=axes[1],
+)
+
+fig.savefig("req4_primaldual_fixed_vs_dynamic_cumregret_budgetevolution.png")
 
 # Conversion rates as a separate plot with dual subplots
 # plot_conversion_rates(
