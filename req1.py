@@ -1,8 +1,3 @@
-
-
-from dataclasses import dataclass
-from typing import Callable, TypeVar
-from numpy.typing import NDArray
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -10,151 +5,7 @@ from environments import Environment, StochasticEnvironment
 from agents import Agent, UCBAgent, CombinatorialUCBBidding
 from baselines import FixedActionBaselineAgent
 from plotting import plot_price_frequency_histograms, plot_cumulative_regret, plot_budget_evolution, plot_animated_price_frequency_histograms, plot_conversion_rates
-
-
-@dataclass
-class RunSimulationResult:
-    """
-    Result of a single simulation run.
-
-    Attributes:
-        valuations: Valuations matrix (num_items, time_horizon)
-        played_arms: Played arms matrix (num_items, time_horizon) (-1 if not played else arm_index)
-    """
-    valuations: NDArray[np.float64]  # (num_items, time_horizon)
-    played_arms: NDArray[np.int64]  # (num_items, time_horizon) (-1/int)
-
-
-def run_simulation(env: Environment, agent: Agent, prices: NDArray[np.float64]) -> RunSimulationResult:
-    """
-    Run a simulation of the agent interacting with the environment.
-
-    Args:
-        env: The environment instance.
-        agent: The agent instance.
-        prices: Prices array (num_prices,)
-
-    Returns:
-        RunSimulationResult: The result of the simulation containing valuations and played arms.
-    """
-
-    time_horizon = env.time_horizon
-    num_items = env.num_items
-
-    total_played_arms = np.full((num_items, time_horizon), -1, dtype=np.int64)
-
-    for t in range(time_horizon):
-        # Agent interaction
-        price_indexes = agent.pull_arm()
-        assert price_indexes.shape == (
-            env.num_items,), f"Expected shape {(env.num_items,)}, got {price_indexes.shape}"
-
-        # Environment interaction
-        valuations = env.round(t)
-        assert valuations.shape == (
-            env.num_items,), f"Expected shape {(env.num_items,)}, got {valuations.shape}"
-
-        # Determine purchases and rewards
-        rewards = np.zeros(num_items, dtype=np.float64)
-        is_budget_exhausted = False
-        for i in range(num_items):
-            if price_indexes[i] == -1:
-                assert np.all(
-                    price_indexes == -1), f"Once an item has budget exhausted (-1), all subsequent items must also be -1. Instead got {price_indexes}"
-                is_budget_exhausted = True
-                break  # Budget exhausted for this item, from now on -1 by default
-
-            price = prices[price_indexes[i]]
-            if valuations[i] >= price:
-                rewards[i] = price
-
-        if is_budget_exhausted:
-            break  # Stop simulation if any item's budget is exhausted
-
-        # Update agent with rewards
-        agent.update(rewards)
-
-        total_played_arms[:, t] = price_indexes
-
-    return RunSimulationResult(valuations=env.valuations, played_arms=total_played_arms)
-
-
-@dataclass
-class RunMultipleSimulationsResult:
-    """
-    Result of multiple simulation runs.
-
-    Attributes:
-        valuations: Valuations tensor (num_trials, num_items, time_horizon)
-        played_arms: Played arms tensor (num_trials, num_items, time_horizon) (-1 if not played else arm_index)
-    """
-    valuations: NDArray[np.float64]  # (num_trials, num_items, time_horizon)
-    # (num_trials, num_items, time_horizon) (-1/int)
-    agent_played_arms: NDArray[np.int64]
-    baseline_played_arms: NDArray[np.int64]
-
-
-AgentConfigType = TypeVar('AgentConfigType')
-BaselineConfigType = TypeVar('BaselineConfigType')
-
-
-def run_multiple_simulations(
-        env_builder: Callable[[], Environment],
-        agent_builder: Callable[[AgentConfigType], Agent],
-        baseline_builder: Callable[[BaselineConfigType, Environment], Agent],
-        num_trials: int,
-        agent_config: AgentConfigType,
-        baseline_config: BaselineConfigType,
-        prices: NDArray[np.float64]) -> RunMultipleSimulationsResult:
-    """
-    Run multiple simulations of the agent interacting with the environment.
-
-    Args:
-        env_builder: A callable that returns a new Environment instance.
-        agent_builder: A callable that takes agent_configs and returns a new Agent instance.
-        baseline_builder: A callable that takes baseline_config and returns a new baseline Agent instance.
-        num_trials: Number of simulation trials to run.
-        agent_configs: Configuration object to pass to the agent_builder.
-        baseline_config: Configuration object to pass to the baseline_builder.
-
-    Returns:
-        RunMultipleSimulationsResult: The result of the simulations containing valuations and played arms.
-    """
-
-    # Initialize environment and agent to get dimensions
-    temp_env = env_builder()
-    num_items = temp_env.num_items
-    time_horizon = temp_env.time_horizon
-
-    valuations = np.zeros(
-        (num_trials, num_items, time_horizon), dtype=np.float64)
-
-    agent_played_arms = np.full(
-        (num_trials, num_items, time_horizon), -1, dtype=np.int64)
-    baseline_played_arms = np.full(
-        (num_trials, num_items, time_horizon), -1, dtype=np.int64)
-
-    for trial in range(num_trials):
-        print(f"Running trial {trial + 1}/{num_trials}...")
-        env = env_builder()
-        agent = agent_builder(agent_config)
-        baseline_agent = baseline_builder(baseline_config, env)
-
-        agent_result = run_simulation(env, agent, prices)
-        baseline_results = run_simulation(env, baseline_agent, prices)
-
-        # (num_items, time_horizon)
-        valuations[trial] = agent_result.valuations
-        # (num_items, time_horizon)
-        agent_played_arms[trial] = agent_result.played_arms
-        baseline_played_arms[trial] = baseline_results.played_arms
-
-    return RunMultipleSimulationsResult(
-        valuations=valuations,
-        agent_played_arms=agent_played_arms,
-        baseline_played_arms=baseline_played_arms
-    )
-
+from runner import run_multiple_simulations
 
 print("Task 1.1: Without budget constraint")
 
@@ -172,70 +23,50 @@ def env_builder() -> Environment:
     )
 
 
-@dataclass
-class UCBAgentConfig:
-    num_prices: int
-    alpha: float = 1.0
-
-
-def agent_builder(config: UCBAgentConfig) -> Agent:
-    assert isinstance(
-        config, UCBAgentConfig), f"Expected UCBAgentConfig, got {type(config)}"
+def agent_builder(env: Environment) -> Agent:
     return UCBAgent(
-        num_prices=config.num_prices,
-        alpha=config.alpha
+        num_prices=num_prices,
     )
 
 
-@dataclass
-class BaselineAgentConfig:
-    budget: int = None  # No budget constraint by default
-
-
-def baseline_builder(config: BaselineAgentConfig, env: Environment) -> Agent:
-    assert isinstance(
-        config, BaselineAgentConfig), f"Expected BaselineAgentConfig, got {type(config)}"
+def baseline_builder(env: Environment) -> Agent:
     return FixedActionBaselineAgent(
         num_items=env.num_items,
         prices=prices,
         time_horizon=time_horizon,
         valuations=env.valuations,
-        budget=config.budget
     )
 
 
-# results = run_multiple_simulations(
-#     env_builder=env_builder,
-#     agent_builder=agent_builder,
-#     baseline_builder=baseline_builder,
-#     num_trials=num_trials,
-#     agent_config=UCBAgentConfig(num_prices=num_prices),
-#     baseline_config=BaselineAgentConfig(),
-#     prices=prices
-# )
+results = run_multiple_simulations(
+    env_builder=env_builder,
+    agent_builders=[
+        baseline_builder,
+        agent_builder,
+    ],
+    num_trials=num_trials,
+    prices=prices
+)
 
-# plot_cumulative_regret(
-#     valuations=results.valuations,
-#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-#     baseline_played_arms=results.baseline_played_arms,
-#     prices=prices,
-#     agents_names=["UCB Agent"],
-#     title="Cumulative Regret of UCB Agent vs Random Baseline"
-# )
+plot_cumulative_regret(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[[1], ...],
+    baseline_played_arms=results.agents_played_arms[0],
+    prices=prices,
+    agents_names=["UCB Agent"],
+    title="Cumulative Regret of UCB Agent vs Random Baseline",
+    save_plot=True,
+    save_path="req1/task1_1_cumulative_regret.png",
+)
 
-# plot_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-#     prices=prices,
-#     agents_names=["UCB Agent"],
-# )
-
-# plot_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
-#     prices=prices,
-#     agents_names=["Baseline Agent"],
-# )
+plot_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[[1], ...],
+    prices=prices,
+    agents_names=["UCB Agent"],
+    save_plot=True,
+    save_path_prefix="req1/task1_1_ucb_agent_histogram"
+)
 
 
 print("Task 1.2: With budget constraint")
@@ -246,42 +77,31 @@ time_horizon = 10000
 budget = 3000
 
 
-@dataclass
-class CombinatorialUCBAgentConfig:
-    num_prices: int
-    budget: int
-    alpha: float = 1.0
-
-
-def combinatorial_agent_builder(config: CombinatorialUCBAgentConfig) -> Agent:
-    assert isinstance(
-        config, CombinatorialUCBAgentConfig), f"Expected CombinatorialUCBAgentConfig, got {type(config)}"
+def combinatorial_agent_builder(env: Environment) -> Agent:
     return CombinatorialUCBBidding(
         num_items=1,  # Currently only supports single item
         price_set=prices,
-        budget=config.budget,
+        budget=budget,
         time_horizon=time_horizon,
-        alpha=config.alpha
     )
 
 
 results = run_multiple_simulations(
     env_builder=env_builder,
-    agent_builder=combinatorial_agent_builder,
-    baseline_builder=baseline_builder,
+    agent_builders=[
+        baseline_builder,
+        combinatorial_agent_builder,
+    ],
     num_trials=num_trials,
-    agent_config=CombinatorialUCBAgentConfig(
-        num_prices=num_prices, budget=budget),
-    baseline_config=BaselineAgentConfig(budget=budget),
-    prices=prices
+    prices=prices,
 )
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
 plot_cumulative_regret(
     valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-    baseline_played_arms=results.baseline_played_arms,
+    agents_played_arms=results.agents_played_arms[[1], ...],
+    baseline_played_arms=results.agents_played_arms[0],
     prices=prices,
     agents_names=["UCB Agent"],
     title="Cumulative Regret of UCB Agent vs Random Baseline",
@@ -290,44 +110,43 @@ plot_cumulative_regret(
 
 plot_budget_evolution(
     valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    agents_played_arms=results.agents_played_arms[[1], ...],
     prices=prices,
     initial_budget=budget,
     agents_names=["UCB Agent"],
     ax=axes[1]
 )
 
+fig.savefig("req1/task1_2_cumulative_regret_and_budget_evolution.png")
+
 # Conversion rates as a separate plot with dual subplots
 plot_conversion_rates(
     valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
-    baseline_played_arms=results.baseline_played_arms,
-    prices=prices,
-    agents_names=["UCB Agent"]
-)
-
-plot_price_frequency_histograms(
-    valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    agents_played_arms=results.agents_played_arms[[1], ...],
+    baseline_played_arms=results.agents_played_arms[0],
     prices=prices,
     agents_names=["UCB Agent"],
+    save_plot=True,
+    save_path="req1/task1_2_conversion_rates.png"
 )
 
 plot_price_frequency_histograms(
     valuations=results.valuations,
-    agents_played_arms=results.baseline_played_arms[np.newaxis, ...],
+    agents_played_arms=results.agents_played_arms[[1], ...],
     prices=prices,
-    agents_names=["Baseline Agent"],
+    agents_names=["UCB Agent"],
+    save_plot=True,
+    save_path_prefix="req1/task1_2_ucb_agent_histogram"
 )
 
 # Genera e salva animazione per l'agente UCB
 print("Generando animazione per l'agente UCB...")
 plot_animated_price_frequency_histograms(
     valuations=results.valuations,
-    agents_played_arms=results.agent_played_arms[np.newaxis, ...],
+    agents_played_arms=results.agents_played_arms[[1], ...],
     prices=prices,
     agents_names=["UCB Agent"],
-    save_path_prefix="req1_animation_ucb"
+    save_path_prefix="req1/animation_budget_ucb"
 )
 
 plt.show()
