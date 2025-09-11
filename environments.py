@@ -142,29 +142,17 @@ class NonStochasticSmoothChangeEnvironment(Environment):
         return distribution
 
     @classmethod
-    def generate_simple_tv(
-        cls, time_horizon: int, num_items: int
+    def generate_uniform_valuations(
+        cls, start: float, end: float, freq: int, time_horizon: int
     ) -> Callable[[int], float]:
-        """Generate simple time-varying valuations"""
-
-        phi = 0.0
-        mu0, A, f = 0.5, 0.1, 100
-        sigma0, A_sigma, phi_sigma, rho0 = 0.1, 0.1, 0, 0.6
-
-        T = time_horizon
-        m = num_items
-        R: np.ndarray = np.eye(m) + (1 - np.eye(m)) * rho0
+        """Generate Uniform valuations with oscillating parameters"""
 
         def distribution(t: int) -> float:
-            mu_t = mu0 + A * np.sin(2 * np.pi * f * t / T + phi)
-            sigma_t = sigma0 + A_sigma * \
-                np.sin(2 * np.pi * f * t / T + phi_sigma)
-            Sigma: np.ndarray = np.diag(
-                [sigma_t] * m) @ R @ np.diag([sigma_t] * m)
-            sample: np.ndarray = np.random.multivariate_normal(
-                [mu_t] * m, Sigma)
-
-            return np.clip(sample[0], 0, 1)
+            low_t = start + (end - start) * \
+                (0.5 + 0.5 * np.sin(freq * np.pi * t / time_horizon))
+            high_t = start + (end - start) * \
+                (0.5 + 0.5 * np.cos(freq * np.pi * t / time_horizon))
+            return np.random.uniform(low=low_t, high=high_t)
 
         return distribution
 

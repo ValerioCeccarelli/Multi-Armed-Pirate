@@ -30,8 +30,9 @@ primal_dual_eta = 1 / np.sqrt(time_horizon)
 def env_builder() -> Environment:
     return NonStochasticSmoothChangeEnvironment(
         distribution_functions=[
-            NonStochasticSmoothChangeEnvironment.generate_simple_tv(
-                time_horizon, 1),
+            NonStochasticSmoothChangeEnvironment.generate_uniform_valuations(
+                start=0.0, end=1.0, freq=100, time_horizon=time_horizon
+            ),
             NonStochasticSmoothChangeEnvironment.generate_beta_valuations(
                 time_horizon, 50
             ),
@@ -205,35 +206,35 @@ plot_budget_evolution(
 fig.savefig("req4/primaldual_fixed_vs_dynamic_cumregret_budgetevolution.png")
 
 # Conversion rates as a separate plot with dual subplots
-# plot_conversion_rates(
-#     valuations=results.valuations,
-#     agents_played_arms=results.agents_played_arms[[1], ...],
-#     baseline_played_arms=results.baseline_played_arms,
-#     prices=prices,
-#     agents_names=["Primal Dual"],
-#     save_plot=True,
-#     save_path="req4/primaldual_conversion_rates.png",
-# )
+plot_conversion_rates(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[[1], ...],
+    baseline_played_arms=results.agents_played_arms[0],
+    prices=prices,
+    agents_names=["Primal Dual"],
+    save_plot=True,
+    save_path="req4/primaldual_conversion_rates.png",
+)
 
-# plot_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.agents_played_arms[[1,2,3],...],
-#     prices=prices,
-#     agents_names=["Primal Dual", "Combinatorial UCB", "UCB Sliding Window"],
-#     save_plot=True,
-#     save_path_prefix="req4/primaldual_price_histograms"
-# )
+plot_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[[1, 2, 3], ...],
+    prices=prices,
+    agents_names=["Primal Dual", "Combinatorial UCB", "UCB Sliding Window"],
+    save_plot=True,
+    save_path_prefix="req4/primaldual_price_histograms"
+)
 
 plt.show()
 
 # Genera e salva animazione per l'agente MultiProduct Primal Dual
 # print("Generando animazione per l'agente MultiProduct Primal Dual...")
-# plot_animated_price_frequency_histograms(
-#     valuations=results.valuations,
-#     agents_played_arms=results.agents_played_arms[only_primal_dual_mask, ...],
-#     prices=prices,
-#     agents_names=["Primal Dual"],
-#     save_path_prefix="req4/animation_primal_dual"
-# )
+plot_animated_price_frequency_histograms(
+    valuations=results.valuations,
+    agents_played_arms=results.agents_played_arms[only_primal_dual_mask, ...],
+    prices=prices,
+    agents_names=["Primal Dual"],
+    save_path_prefix="req4/animation_primal_dual"
+)
 
-# plt.show()
+plt.show()
