@@ -2,7 +2,6 @@ import itertools
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.optimize import linprog
 
 from agents import Agent
 
