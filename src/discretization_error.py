@@ -1,6 +1,7 @@
+from pathlib import Path
+
 from matplotlib import pyplot as plt
 import numpy as np
-import os
 
 n_samples = 10_000
 x = np.linspace(0, 1, n_samples)
@@ -28,6 +29,7 @@ plt.ylabel('Revenue')
 plt.grid()
 
 plt.legend()
-os.makedirs('others', exist_ok=True)
-plt.savefig('others/optimal_price_uniform.png')
+results_dir = Path("../results/others")
+results_dir.mkdir(parents=True, exist_ok=True)
+plt.savefig(results_dir / 'optimal_price_uniform.png')
 plt.show()
