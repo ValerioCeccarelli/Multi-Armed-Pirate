@@ -1,25 +1,28 @@
-import os
+from pathlib import Path
+
 import numpy as np
 from matplotlib import pyplot as plt
-from numpy.typing import NDArray
 
-from agents import (
+from core.agents import (
     Agent,
     PrimalDualAgent,
 )
-from baselines import FixedActionBaselineAgent
-from environments import (
+from core.baselines import FixedActionBaselineAgent
+from core.environments import (
     Environment,
     NonStochasticSmoothChangeEnvironment,
 )
-from plotting import (
+from core.plotting import (
     plot_animated_price_frequency_histograms,
     plot_budget_evolution,
     plot_conversion_rates,
     plot_cumulative_regret,
     plot_price_frequency_histograms,
 )
-from runner import run_multiple_simulations
+from core.runner import run_multiple_simulations
+
+results_dir = Path("../results/req3")
+results_dir.mkdir(parents=True, exist_ok=True)
 
 # ---- Task: Multiple items (3) with budget constraint ----
 
@@ -94,8 +97,7 @@ plot_budget_evolution(
     ax=axes[1],
 )
 
-os.makedirs("req3", exist_ok=True)
-fig.savefig("req3/cumulative_regret_and_budget_evolution.png")
+fig.savefig(results_dir / "cumulative_regret_and_budget_evolution.png")
 
 # Conversion rates as a separate plot with dual subplots
 plot_conversion_rates(
@@ -104,7 +106,7 @@ plot_conversion_rates(
     baseline_played_arms=results.agents_played_arms[0],
     prices=prices,
     agents_names=["Primal Dual"],
-    save_path="req3/conversion_rates.png",
+    save_path=results_dir / "conversion_rates.png",
     save_plot=True
 )
 
@@ -114,7 +116,7 @@ plot_price_frequency_histograms(
     prices=prices,
     agents_names=["Primal Dual"],
     save_plot=True,
-    save_path_prefix="req3/price_frequency"
+    save_path_prefix=results_dir / "price_frequency"
 )
 
 plt.show()
@@ -126,7 +128,7 @@ plot_animated_price_frequency_histograms(
     agents_played_arms=results.agents_played_arms[[1], ...],
     prices=prices,
     agents_names=["Primal Dual"],
-    save_path_prefix="req3/animation_primal_dual"
+    save_path_prefix=results_dir / "animation_primal_dual"
 )
 
 plt.show()

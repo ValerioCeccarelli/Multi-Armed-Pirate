@@ -1,11 +1,16 @@
+from pathlib import Path
+
 import numpy as np
 from matplotlib import pyplot as plt
 
-from environments import Environment, StochasticEnvironment
-from agents import Agent, UCBAgent, CombinatorialUCBBidding
-from baselines import FixedActionBaselineAgent
-from plotting import plot_price_frequency_histograms, plot_cumulative_regret, plot_budget_evolution, plot_animated_price_frequency_histograms, plot_conversion_rates
-from runner import run_multiple_simulations
+from core.environments import Environment, StochasticEnvironment
+from core.agents import Agent, UCBAgent, CombinatorialUCBBidding
+from core.baselines import FixedActionBaselineAgent
+from core.plotting import plot_price_frequency_histograms, plot_cumulative_regret, plot_budget_evolution, plot_animated_price_frequency_histograms, plot_conversion_rates
+from core.runner import run_multiple_simulations
+
+results_dir = Path("../results/req1")
+results_dir.mkdir(parents=True, exist_ok=True)
 
 print("Task 1.1: Without budget constraint")
 
@@ -56,7 +61,7 @@ plot_cumulative_regret(
     agents_names=["UCB Agent"],
     title="Cumulative Regret of UCB Agent vs Random Baseline",
     save_plot=True,
-    save_path="req1/task1_1_cumulative_regret.png",
+    save_path=results_dir / "task1_1_cumulative_regret.png",
 )
 
 plot_price_frequency_histograms(
@@ -65,7 +70,7 @@ plot_price_frequency_histograms(
     prices=prices,
     agents_names=["UCB Agent"],
     save_plot=True,
-    save_path_prefix="req1/task1_1_ucb_agent_histogram"
+    save_path_prefix=results_dir / "task1_1_ucb_agent_histogram"
 )
 
 print("Task 1.1.2:  Without budget constraint but more arms")
@@ -117,7 +122,7 @@ plot_cumulative_regret(
     agents_names=["UCB Agent"],
     title="Cumulative Regret of UCB Agent vs Random Baseline",
     save_plot=True,
-    save_path="req1/task1_1_2_cumulative_regret.png",
+    save_path=results_dir / "task1_1_2_cumulative_regret.png",
 )
 
 plot_price_frequency_histograms(
@@ -126,7 +131,7 @@ plot_price_frequency_histograms(
     prices=prices,
     agents_names=["UCB Agent"],
     save_plot=True,
-    save_path_prefix="req1/task1_1_2_ucb_agent_histogram"
+    save_path_prefix=results_dir / "task1_1_2_ucb_agent_histogram"
 )
 
 print("Task 1.2: With budget constraint")
@@ -179,7 +184,7 @@ plot_budget_evolution(
     ax=axes[1]
 )
 
-fig.savefig("req1/task1_2_cumulative_regret_and_budget_evolution.png")
+fig.savefig(results_dir / "task1_2_cumulative_regret_and_budget_evolution.png")
 
 # Conversion rates as a separate plot with dual subplots
 plot_conversion_rates(
@@ -189,7 +194,7 @@ plot_conversion_rates(
     prices=prices,
     agents_names=["UCB Agent"],
     save_plot=True,
-    save_path="req1/task1_2_conversion_rates.png"
+    save_path=results_dir / "task1_2_conversion_rates.png"
 )
 
 plot_price_frequency_histograms(
@@ -198,7 +203,7 @@ plot_price_frequency_histograms(
     prices=prices,
     agents_names=["UCB Agent"],
     save_plot=True,
-    save_path_prefix="req1/task1_2_ucb_agent_histogram"
+    save_path_prefix=results_dir / "task1_2_ucb_agent_histogram"
 )
 
 # Genera e salva animazione per l'agente UCB
@@ -208,7 +213,7 @@ plot_animated_price_frequency_histograms(
     agents_played_arms=results.agents_played_arms[[1], ...],
     prices=prices,
     agents_names=["UCB Agent"],
-    save_path_prefix="req1/animation_budget_ucb"
+    save_path_prefix=results_dir / "animation_budget_ucb"
 )
 
 plt.show()

@@ -1,17 +1,23 @@
+from pathlib import Path
+
 import numpy as np
 from matplotlib import pyplot as plt
 
-from environments import Environment, NonStochasticSmoothChangeEnvironment
-from agents import Agent, MultiItemPrimalDualAgent, CombinatorialUCBBidding, CombinatorialUCBBiddingSlidingWindow
-from baselines import FixedActionBaselineAgent
-from plotting import (
+from core.environments import Environment, NonStochasticSmoothChangeEnvironment
+from core.agents import Agent, MultiItemPrimalDualAgent, CombinatorialUCBBidding, CombinatorialUCBBiddingSlidingWindow
+from core.baselines import FixedActionBaselineAgent
+
+results_dir = Path("../results/req4")
+results_dir.mkdir(parents=True, exist_ok=True)
+
+from core.plotting import (
     plot_price_frequency_histograms,
     plot_cumulative_regret,
     plot_budget_evolution,
     plot_animated_price_frequency_histograms,
     plot_conversion_rates,
 )
-from runner import run_multiple_simulations
+from core.runner import run_multiple_simulations
 
 # ---- Task: Multiple items (3) with budget constraint ----
 
@@ -133,7 +139,7 @@ plot_budget_evolution(
     ax=axes[1],
 )
 
-fig.savefig("req4/primaldual_cumregret_budgetevolution.png")
+fig.savefig(results_dir / "primaldual_cumregret_budgetevolution.png")
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
@@ -156,7 +162,7 @@ plot_budget_evolution(
     ax=axes[1],
 )
 
-fig.savefig("req4/primaldual_vs_combucb_cumregret_budgetevolution.png")
+fig.savefig(results_dir / "primaldual_vs_combucb_cumregret_budgetevolution.png")
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
@@ -180,7 +186,7 @@ plot_budget_evolution(
     ax=axes[1],
 )
 
-fig.savefig("req4/primaldual_vs_ucbsliding_cumregret_budgetevolution.png")
+fig.savefig(results_dir / "primaldual_vs_ucbsliding_cumregret_budgetevolution.png")
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
@@ -203,7 +209,7 @@ plot_budget_evolution(
     ax=axes[1],
 )
 
-fig.savefig("req4/primaldual_fixed_vs_dynamic_cumregret_budgetevolution.png")
+fig.savefig(results_dir / "primaldual_fixed_vs_dynamic_cumregret_budgetevolution.png")
 
 # Conversion rates as a separate plot with dual subplots
 plot_conversion_rates(
@@ -213,7 +219,7 @@ plot_conversion_rates(
     prices=prices,
     agents_names=["Primal Dual"],
     save_plot=True,
-    save_path="req4/primaldual_conversion_rates.png",
+    save_path=results_dir / "primaldual_conversion_rates.png",
 )
 
 plot_price_frequency_histograms(
@@ -222,7 +228,7 @@ plot_price_frequency_histograms(
     prices=prices,
     agents_names=["Primal Dual", "Combinatorial UCB", "UCB Sliding Window"],
     save_plot=True,
-    save_path_prefix="req4/primaldual_price_histograms"
+    save_path_prefix=results_dir / "primaldual_price_histograms"
 )
 
 plt.show()
@@ -234,7 +240,7 @@ plot_animated_price_frequency_histograms(
     agents_played_arms=results.agents_played_arms[only_primal_dual_mask, ...],
     prices=prices,
     agents_names=["Primal Dual"],
-    save_path_prefix="req4/animation_primal_dual"
+    save_path_prefix=results_dir / "animation_primal_dual"
 )
 
 plt.show()

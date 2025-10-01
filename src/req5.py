@@ -1,22 +1,26 @@
-import os
+from pathlib import Path
+
 import numpy as np
 from matplotlib import pyplot as plt
 
-from agents import Agent, CombinatorialUCBBiddingSlidingWindow
-from baselines import FixedActionBaselineAgent
-from environments import (
+from core.agents import Agent, CombinatorialUCBBiddingSlidingWindow
+from core.baselines import FixedActionBaselineAgent
+from core.environments import (
     Environment,
     NonStochasticAbruptChangeEnvironment,
     NonStochasticSmoothChangeEnvironment,
 )
-from plotting import (
+from core.plotting import (
     plot_animated_price_frequency_histograms,
     plot_budget_evolution,
     plot_conversion_rates,
     plot_cumulative_regret,
     plot_price_frequency_histograms,
 )
-from runner import run_multiple_simulations
+from core.runner import run_multiple_simulations
+
+results_dir = Path("../results/req5")
+results_dir.mkdir(parents=True, exist_ok=True)
 
 # ---- Task: Multiple items (3) with budget constraint ----
 
@@ -117,8 +121,7 @@ plot_budget_evolution(
     ax=axes[1],
 )
 
-os.makedirs("req5", exist_ok=True)
-fig.savefig("req5/cumulative_regret_budget_evolution.png")
+fig.savefig(results_dir / "cumulative_regret_budget_evolution.png")
 
 
 temp_env = env_builder2()
@@ -128,7 +131,7 @@ plot_price_frequency_histograms(
     prices=prices,
     agents_names=[f"Optimal Baseline"],
     save_plot=True,
-    save_path_prefix=f"req5/price_histogram_baseline",
+    save_path_prefix=results_dir / "price_histogram_baseline",
 )
 
 for interval_index in range(3):
@@ -146,7 +149,7 @@ for interval_index in range(3):
         prices=prices,
         agents_names=[f"Sliding Window UCB (Interval {interval_index + 1})"],
         save_plot=True,
-        save_path=f"req5/conversion_rates_interval_{interval_index + 1}.png",
+        save_path=results_dir / "conversion_rates_interval_{interval_index + 1}.png",
     )
 
     plot_price_frequency_histograms(
@@ -157,7 +160,7 @@ for interval_index in range(3):
         prices=prices,
         agents_names=[f"Sliding Window UCB (Interval {interval_index + 1})"],
         save_plot=True,
-        save_path_prefix=f"req5/price_histogram_interval",
+        save_path_prefix=results_dir / "price_histogram_interval",
     )
 
 # Genera e salva animazione per l'agente Sliding Window UCB
@@ -167,7 +170,7 @@ plot_animated_price_frequency_histograms(
     agents_played_arms=results.agents_played_arms[[1], ...],
     prices=prices,
     agents_names=["Sliding Window UCB"],
-    save_path_prefix="req5/animation_sliding_window_ucb",
+    save_path_prefix=results_dir / "animation_sliding_window_ucb",
 )
 
 plt.show()

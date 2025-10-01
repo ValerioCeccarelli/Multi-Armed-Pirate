@@ -3,7 +3,7 @@ import itertools
 import numpy as np
 from numpy.typing import NDArray
 
-from agents import Agent
+from core.agents import Agent
 
 
 class FixedActionBaselineAgent(Agent):

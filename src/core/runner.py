@@ -1,12 +1,11 @@
 from dataclasses import dataclass
-from typing import Callable, TypeVar
+from typing import Callable
 from numpy.typing import NDArray
 import numpy as np
-from matplotlib import pyplot as plt
 import time
 
-from environments import Environment
-from agents import Agent
+from core.environments import Environment
+from core.agents import Agent
 
 
 @dataclass
