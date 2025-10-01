@@ -7,7 +7,7 @@ from scipy.optimize import linprog
 from agents import Agent
 
 
-class FixedActionBaselineAgent:
+class FixedActionBaselineAgent(Agent):
     def __init__(
         self,
         num_items: int,
@@ -54,8 +54,7 @@ class FixedActionBaselineAgent:
         )
 
         self.optimal_indexes = np.array(
-            [self.prices.index(
-                p) if p in self.prices else 0 for p in optimal_prices],
+            [self.prices.index(p) if p in self.prices else 0 for p in optimal_prices],
             dtype=int,
         )
 
@@ -136,179 +135,6 @@ class FixedActionBaselineAgent:
         self, rewards: NDArray[np.float64], valuations: NDArray[np.float64] = None
     ) -> None:
         self.current_round += 1
-
-
-class PerfectBaseline:
-    def __init__(
-        self,
-        num_items: int,
-        prices: NDArray[np.float64],
-        time_horizon: int,
-        valuations: np.ndarray,
-        budget: int = None,
-    ):
-        """
-        This baseline choose the prices based on the best possible reward that can be achieved.
-        It's impossible that another agent performs better that this one.
-
-        Args:
-            num_items: Number of items
-            prices: List of possible prices for each item (num_prices,)
-            time_horizon: Total number of rounds
-            valuations: Known valuations for each item at each round (num_items, time_horizon)
-            budget: Total budget (if None, set to time_horizon)
-        """
-        self.num_items = int(num_items)
-        assert self.num_items > 0, "num_items must be positive"
-        assert prices.any, "prices must be non-empty"
-        self.num_prices = len(prices)
-        if budget is None:
-            budget = time_horizon * num_items
-        assert budget >= self.num_items, "budget must be at least num_items"
-        self.time_horizon = int(time_horizon)
-        self.current_round = 0
-
-        valuations = np.asarray(valuations, dtype=float)
-        assert valuations.shape == (
-            self.num_items,
-            self.time_horizon,
-        ), "valuations must be shape (num_items, time_horizon)"
-
-        triples = [
-            (float(valuations[i, t]), i, t)
-            for i in range(num_items)
-            for t in range(time_horizon)
-        ]
-
-        # Sort descending by valuation
-        triples.sort(key=lambda x: x[0], reverse=True)
-        self.schedule = np.full(
-            (num_items, time_horizon), self.num_prices - 1, dtype=int
-        )
-
-        # Place budget-limited selected positions
-        B = min(budget, len(triples))
-        for k in range(B):
-            v, i, t = triples[k]
-            idx = 0
-            # Greatest price among the prices smaller than v
-            for price_idx in range(self.num_prices):
-                if prices[price_idx] <= v:
-                    idx = price_idx
-            self.schedule[i, t] = idx
-
-    def pull_arm(self) -> NDArray[np.int64]:
-        """Return the scheduled price index for each item at current_round."""
-        t = self.current_round
-        if t < 0 or t >= self.time_horizon:
-            raise IndexError("current_round out of bounds")
-        return self.schedule[:, t]
-
-    def update(
-        self, rewards: NDArray[np.float64], valuations: NDArray[np.float64] = None
-    ) -> None:
-        self.current_round += 1
-
-
-class OptimalDistributionMultiItemBaselineAgent:
-    def __init__(
-        self,
-        valuations: NDArray[np.float64],
-        prices: NDArray[np.float64],
-        time_horizon: int,
-        budget: int = None,
-    ):
-        self.valuations = valuations
-        self.prices = prices
-        self.time_horizon = time_horizon
-        self.budget = budget if budget is not None else time_horizon
-        self.num_items = valuations.shape[0]
-
-        self.optimal_distribution = self.compute_extended_clairvoyant(
-            self.valuations, self.prices, self.budget
-        )
-
-    def compute_sell_probabilities_multi(self, V, prices):
-        """
-        Compute selling probabilities for multiple products.
-
-        Args:
-            V: array of valuations (T, m)
-            prices: array of prices
-
-        Returns:
-            s: matrix of selling probabilities (m, K)
-        """
-        T_env, m_env = V.shape
-        K = len(prices)
-        s = np.zeros((m_env, K))
-
-        for j in range(m_env):
-            for i, p in enumerate(prices):
-                s[j, i] = np.sum(V[:, j] >= p) / T_env
-
-        return s
-
-    def compute_extended_clairvoyant(self, valuation: NDArray[np.float64], prices: NDArray[np.float64], budget: int) -> NDArray[np.float64]:
-        """
-        Extended clairvoyant solution for multi-product pricing.
-
-        Args:
-            valuation: array of user valuation (num_items, time_horizon)
-            prices: list of available prices (num_prices,)
-            budget: total budget
-
-        Returns: optimal distribution (num_items, num_prices)
-        """
-        V = valuation.T
-        T_env, m_env = V.shape
-        K = len(prices)
-        pacing_rate = budget / T_env
-
-        s = self.compute_sell_probabilities_multi(V, prices)
-
-        # Flatten variables in LP formulation
-        c = -(np.tile(prices, m_env) * s.flatten())
-        A_ub = np.array([s.flatten()])
-        b_ub = np.array([pacing_rate])
-
-        A_eq = []
-        b_eq = []
-        for j in range(m_env):
-            eq = np.zeros(m_env * K)
-            eq[j*K:(j+1)*K] = 1
-            A_eq.append(eq)
-            b_eq.append(1)
-
-        A_eq = np.array(A_eq)
-        b_eq = np.array(b_eq)
-        bounds = [(0, 1)] * (m_env * K)
-
-        res = linprog(c, A_ub=A_ub, b_ub=b_ub,
-                      A_eq=A_eq, b_eq=b_eq,
-                      bounds=bounds, method="highs")
-
-        if not res.success:
-            raise ValueError("LP failed: " + res.message)
-
-        gamma = res.x.reshape((m_env, K))
-        expected_utility = -res.fun
-        expected_cost = np.dot(s.flatten(), res.x)
-
-        return gamma
-
-    def pull_arm(self) -> NDArray[np.int64]:
-        """Sample price indexes for each item based on the optimal distribution."""
-        sampled_indexes = np.zeros(self.num_items, dtype=int)
-        for item_idx in range(self.num_items):
-            sampled_indexes[item_idx] = np.random.choice(
-                a=len(self.prices),
-                p=self.optimal_distribution[item_idx],
-            )
-        return sampled_indexes
-
-    def update(self, rewards: NDArray[np.float64], valuations: NDArray[np.float64] = None) -> None:
-        pass
 
 
 if __name__ == "__main__":
