@@ -59,7 +59,7 @@ plot_cumulative_regret(
     baseline_played_arms=results.agents_played_arms[0],
     prices=prices,
     agents_names=["UCB Agent"],
-    title="Cumulative Regret of UCB Agent vs Random Baseline",
+    title="Cumulative Regret of UCB Agent vs Fixed Action Baseline",
     save_plot=True,
     save_path=results_dir / "task1_1_cumulative_regret.png",
 )
@@ -120,7 +120,7 @@ plot_cumulative_regret(
     baseline_played_arms=results.agents_played_arms[0],
     prices=prices,
     agents_names=["UCB Agent"],
-    title="Cumulative Regret of UCB Agent vs Random Baseline",
+    title="Cumulative Regret of UCB Agent vs Fixed Action Baseline",
     save_plot=True,
     save_path=results_dir / "task1_1_2_cumulative_regret.png",
 )
@@ -171,7 +171,7 @@ plot_cumulative_regret(
     baseline_played_arms=results.agents_played_arms[0],
     prices=prices,
     agents_names=["UCB Agent"],
-    title="Cumulative Regret of UCB Agent vs Random Baseline",
+    title="Cumulative Regret of UCB Agent vs Fixed Action Baseline",
     ax=axes[0]
 )
 
